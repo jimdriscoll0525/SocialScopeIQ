@@ -25,6 +25,7 @@ create table if not exists public.leads (
   followup_status text default 'NOT STARTED'
     check (followup_status in ('NOT STARTED','IN PROGRESS','DONE')),
   notes text,
+  detected_state text,                         -- 'MA','NH','RI','NJ','ME','CT','FL','UNKNOWN','OUT_OF_STATE'
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -33,6 +34,7 @@ create index if not exists leads_date_found_idx on public.leads (date_found desc
 create index if not exists leads_tier_idx on public.leads (intent_tier);
 create index if not exists leads_status_idx on public.leads (response_status);
 create index if not exists leads_community_idx on public.leads (community);
+create index if not exists leads_detected_state_idx on public.leads (detected_state);
 
 -- Updated-at trigger
 create or replace function public.set_updated_at()

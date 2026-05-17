@@ -4,6 +4,7 @@ import { scoutReddit } from "@/lib/scouts/reddit";
 import { scoutBiggerPockets } from "@/lib/scouts/biggerpockets";
 import { scoutStackExchange } from "@/lib/scouts/stackexchange";
 import { classifyTier, draftResponse } from "@/lib/drafter";
+import { detectState, shouldKeepLead } from "@/lib/state-filter";
 import type { LeadInsert, ScoutResult } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -43,18 +44,29 @@ export async function GET(req: Request) {
     .map((c) => ({ ...c, intent_tier: classifyTier(`${c.post_title}\n${c.body}`) }))
     .filter((c): c is ScoutResult & { intent_tier: NonNullable<ReturnType<typeof classifyTier>> } => c.intent_tier !== null);
 
+  // 2a. State filter — drop clear out-of-state leads, tag the rest.
+  const stateFiltered = tiered
+    .map((t) => ({ ...t, state_result: detectState({ text: `${t.post_title}\n${t.body}`, community: t.community, source: t.source }) }))
+    .filter((t) => shouldKeepLead(t.state_result));
+  const oosDropped = tiered.length - stateFiltered.length;
+
   // 3. De-duplicate against the DB (skip URLs we've already saved).
-  const urls = tiered.map((t) => t.post_url);
+  const urls = stateFiltered.map((t) => t.post_url);
   const { data: existing } = await supabase
     .from("leads")
     .select("post_url")
     .in("post_url", urls);
   const existingSet = new Set((existing || []).map((r) => r.post_url));
-  const fresh = tiered.filter((t) => !existingSet.has(t.post_url));
+  const fresh = stateFiltered.filter((t) => !existingSet.has(t.post_url));
 
-  // 4. Rank: Tier 1 first, then Tier 2, then Tier 3. Cap to MAX_DRAFTS.
+  // 4. Rank: licensed-state Tier 1s first, then licensed Tier 2/3, then unknown-state, capped to MAX_DRAFTS.
   const tierOrder = { "TIER 1": 0, "TIER 2": 1, "TIER 3": 2 } as const;
-  fresh.sort((a, b) => tierOrder[a.intent_tier] - tierOrder[b.intent_tier]);
+  fresh.sort((a, b) => {
+    const aLicensed = a.state_result.state !== "UNKNOWN" ? 0 : 1;
+    const bLicensed = b.state_result.state !== "UNKNOWN" ? 0 : 1;
+    if (aLicensed !== bLicensed) return aLicensed - bLicensed;
+    return tierOrder[a.intent_tier] - tierOrder[b.intent_tier];
+  });
   const toDraft = fresh.slice(0, MAX_DRAFTS);
 
   // 5. Draft responses (Anthropic API) and insert.
@@ -88,7 +100,8 @@ export async function GET(req: Request) {
         reason_selected: draft.reason_selected,
         drafted_response: draft.drafted_response,
         response_link: null,
-        notes: null
+        notes: null,
+        detected_state: c.state_result.state
       };
 
       const { error } = await supabase.from("leads").insert(lead);
@@ -106,6 +119,7 @@ export async function GET(req: Request) {
       stackexchange: se.status === "fulfilled" ? se.value.length : `error: ${(se as PromiseRejectedResult).reason}`
     },
     matched: tiered.length,
+    oos_dropped: oosDropped,
     fresh: fresh.length,
     drafted: toDraft.length,
     inserted,

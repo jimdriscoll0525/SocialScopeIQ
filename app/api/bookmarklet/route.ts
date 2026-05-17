@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { classifyTier, draftResponse } from "@/lib/drafter";
+import { detectState } from "@/lib/state-filter";
 import type { LeadInsert } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -96,7 +97,12 @@ export async function POST(req: Request) {
     reason_selected: draft.reason_selected,
     drafted_response: draft.drafted_response,
     response_link: null,
-    notes: "Captured via bookmarklet."
+    notes: "Captured via bookmarklet.",
+    detected_state: detectState({
+      text: `${payload.post_title}\n${payload.body}`,
+      community: payload.community,
+      source: payload.source
+    }).state
   };
 
   const { data, error } = await supabase.from("leads").insert(lead).select("id").single();

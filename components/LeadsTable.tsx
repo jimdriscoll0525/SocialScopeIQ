@@ -5,12 +5,15 @@ import type { Lead, ResponseStatus, FollowupStatus } from "@/lib/types";
 
 const STATUS_OPTIONS: ResponseStatus[] = ["DRAFT", "POSTED", "REPLIED", "ENGAGED", "IGNORED"];
 const FOLLOWUP_OPTIONS: FollowupStatus[] = ["NOT STARTED", "IN PROGRESS", "DONE"];
+const STATE_OPTIONS = ["ALL", "LICENSED ONLY", "MA", "NH", "RI", "NJ", "ME", "CT", "FL", "UNKNOWN", "OUT_OF_STATE"];
+const LICENSED_STATES = new Set(["MA", "NH", "RI", "NJ", "ME", "CT", "FL"]);
 
 export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
   const [leads, setLeads] = useState<Lead[]>(initialLeads);
   const [tier, setTier] = useState<string>("ALL");
   const [status, setStatus] = useState<string>("ALL");
   const [community, setCommunity] = useState<string>("ALL");
+  const [stateFilter, setStateFilter] = useState<string>("LICENSED ONLY");
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -25,6 +28,11 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
       if (tier !== "ALL" && l.intent_tier !== tier) return false;
       if (status !== "ALL" && l.response_status !== status) return false;
       if (community !== "ALL" && l.community !== community) return false;
+      if (stateFilter === "LICENSED ONLY") {
+        if (!l.detected_state || !LICENSED_STATES.has(l.detected_state)) return false;
+      } else if (stateFilter !== "ALL" && l.detected_state !== stateFilter) {
+        return false;
+      }
       if (query) {
         const q = query.toLowerCase();
         const hay = `${l.post_title || ""} ${l.author || ""} ${l.key_question || ""} ${l.primary_intent || ""}`.toLowerCase();
@@ -32,7 +40,7 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
       }
       return true;
     });
-  }, [leads, tier, status, community, query]);
+  }, [leads, tier, status, community, stateFilter, query]);
 
   async function copyResponse(lead: Lead) {
     if (!lead.drafted_response) return;
@@ -68,6 +76,7 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
     <>
       <Toast />
       <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
+        <Select label="State" value={stateFilter} onChange={setStateFilter} options={STATE_OPTIONS} />
         <Select label="Tier" value={tier} onChange={setTier} options={["ALL", "TIER 1", "TIER 2", "TIER 3"]} />
         <Select label="Status" value={status} onChange={setStatus} options={["ALL", ...STATUS_OPTIONS]} />
         <Select label="Community" value={community} onChange={setCommunity} options={["ALL", ...communities]} />
@@ -85,6 +94,7 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
           <thead className="bg-neutral-50 text-left text-xs uppercase tracking-wider text-neutral-500">
             <tr>
               <th className="px-3 py-2">Date</th>
+              <th className="px-3 py-2">State</th>
               <th className="px-3 py-2">Tier</th>
               <th className="px-3 py-2">Community</th>
               <th className="px-3 py-2">Title</th>
@@ -102,6 +112,9 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
                 <>
                   <tr key={l.id} className="hover:bg-neutral-50">
                     <td className="px-3 py-2 align-top text-neutral-600">{l.date_found}</td>
+                    <td className="px-3 py-2 align-top">
+                      <StateBadge state={l.detected_state} />
+                    </td>
                     <td className="px-3 py-2 align-top">
                       <TierBadge tier={l.intent_tier} />
                     </td>
@@ -163,7 +176,7 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
                   </tr>
                   {isOpen && (
                     <tr className="bg-neutral-50">
-                      <td colSpan={9} className="px-3 py-4">
+                      <td colSpan={10} className="px-3 py-4">
                         <div className="grid gap-4 md:grid-cols-2">
                           <Field label="Key question" value={l.key_question} />
                           <Field label="Reason selected" value={l.reason_selected} />
@@ -197,7 +210,7 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-3 py-12 text-center text-neutral-500">
+                <td colSpan={10} className="px-3 py-12 text-center text-neutral-500">
                   No leads match those filters.
                 </td>
               </tr>
@@ -233,6 +246,18 @@ function TierBadge({ tier }: { tier: string | null }) {
     : tier === "TIER 2" ? "bg-sky-100 text-sky-800"
     : "bg-neutral-100 text-neutral-700";
   return <span className={`rounded px-2 py-0.5 text-xs font-medium ${color}`}>{tier}</span>;
+}
+
+function StateBadge({ state }: { state: string | null }) {
+  if (!state) return <span className="text-xs text-neutral-400">—</span>;
+  const licensed = new Set(["MA", "NH", "RI", "NJ", "ME", "CT", "FL"]);
+  if (licensed.has(state)) {
+    return <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">{state}</span>;
+  }
+  if (state === "OUT_OF_STATE") {
+    return <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">OOS</span>;
+  }
+  return <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">?</span>;
 }
 
 function Field({ label, value }: { label: string; value: string | null }) {
