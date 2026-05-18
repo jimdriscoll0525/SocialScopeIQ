@@ -1,9 +1,11 @@
 import { supabaseAdmin } from "@/lib/supabase";
 import LeadsTable from "@/components/LeadsTable";
+import RunScoutButton from "@/components/RunScoutButton";
 import type { Lead } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const maxDuration = 300; // covers a manual "Find new posts" run
 
 export default async function Page() {
   const supabase = supabaseAdmin();
@@ -25,7 +27,7 @@ export default async function Page() {
         </div>
         <nav className="flex gap-4 text-sm">
           <a href="/bookmarklet" className="text-neutral-600 hover:text-black">Bookmarklet</a>
-          <a href="/api/scout" className="text-neutral-600 hover:text-black">Run scout</a>
+          <RunScoutButton />
         </nav>
       </header>
       {error ? (
