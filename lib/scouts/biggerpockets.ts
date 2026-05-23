@@ -106,9 +106,13 @@ async function apifyJson(token: string, path: string, init?: RequestInit): Promi
 // appends " | BiggerPockets". Strip the suffix, then collapse exact doubling.
 function cleanTitle(raw: string): string {
   let t = raw.replace(/\s*\|\s*BiggerPockets.*$/i, "").trim();
-  if (t.length > 0 && t.length % 2 === 0) {
-    const half = t.length / 2;
-    if (t.slice(0, half) === t.slice(half)) t = t.slice(0, half).trim();
+  // Collapse a title the crawler doubled, with OR without a separating space
+  // ("FooFoo" → even length; "Foo Foo" → odd length, skip the 1 middle char).
+  if (t.length > 1) {
+    const half = Math.floor(t.length / 2);
+    const first = t.slice(0, half);
+    const second = t.length % 2 === 0 ? t.slice(half) : t.slice(half + 1);
+    if (first.length > 0 && first === second) t = first.trim();
   }
   return t;
 }
