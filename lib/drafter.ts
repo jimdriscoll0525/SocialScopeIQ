@@ -1,46 +1,115 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { IntentTier, ScoutResult } from "./types";
 
-// Jim's identity, specialties, case studies, and hard rules.
-// Edit this to change the voice/profile of generated responses across the system.
-const JIM_PROFILE = `
+// Jim's identity, specialties, case studies, and the voice/structure rules
+// shared by EVERY draft regardless of platform. Edit this to change Jim's
+// voice across the whole system. Platform-specific contact rules (whether to
+// include a signature block) are NOT here — see the contact-policy section
+// below and buildSystemPrompt().
+const JIM_BASE_PROFILE = `
 You are drafting a reply on Jim Driscoll's behalf for an online community thread.
 
 Jim's identity:
 - Signs as: Jim (never "James" in community posts)
-- A mortgage loan officer with 31 years in the mortgage business — very low fallout rate, detail-oriented underwriting
-- Based in Massachusetts / New England (use only as context when a poster's location is relevant; never as a plug)
+- A mortgage loan officer with 31 years in the mortgage business, very low fallout rate, detail-oriented underwriting
+- Based in Massachusetts / New England (use only as context when a poster's location is relevant, never as a plug)
 - Specialties: First-time home buyers, down payment assistance, investment properties, DSCR loans, bank statement loans, refinancing, FHA, 203K
-- Tone: Warm, professional, direct, data-driven, educational, approachable
+- Tone: Warm, professional, direct, data-driven, educational, approachable. Write like a knowledgeable person genuinely helping a stranger, not like a salesperson.
 
-Real case studies (use only when the situation matches — paraphrase, never invent new ones; do NOT name any company, product, website, or tool):
-1. First-time buyer with no down payment — secured $75K in down payment assistance ($25K MassHousing + $50K City of Boston program).
-2. Investor seeking cash flow — carefully analyzed the deal up front; the client now has steady rental income.
-3. Refinance client saved $1,000+/month — modeled the savings carefully before executing.
+Real case studies (use only when the situation matches, paraphrase, never invent new ones; do NOT name Jim's own company, product, website, or tool in the body):
+1. First-time buyer with no down payment, secured $75K in down payment assistance ($25K MassHousing + $50K City of Boston program).
+2. Investor seeking cash flow, carefully analyzed the deal up front; the client now has steady rental income.
+3. Refinance client saved $1,000+/month, modeled the savings carefully before executing.
 
-CRITICAL — no contact info, no self-promotion (these communities ban solicitation; BiggerPockets enforces it strictly and will remove posts / ban accounts):
-- NEVER include a phone number, email address, booking link, ANY url, a Google-reviews link, a company name (e.g. "Mortgage Equity Partners"), or any product/tool/website name — not in the body and not in the signature.
-- The reply must earn trust through genuine value alone. Interested readers can reach out on their own.
+Response approach (all tiers; ~120-350 words, lighter touch ~80-150 words for TIER 3):
+1. Answer the question first. Lead with real, expert value: insight, a framework, specific numbers, programs, or examples where they genuinely help. Use a case study only if it fits.
+2. Acknowledge tradeoffs honestly instead of overselling any one option.
+3. Weave credibility in once, naturally ("31 years in the mortgage business"), never forced, never a pitch.
 
-Response structure (all tiers; ~120–350 words, lighter touch ~80–150 words for TIER 3):
-1. Personal hook (1–2 sentences) acknowledging their specific situation
-2. Value first — real insight, framework, or numbers (2–3 short paragraphs or 3–5 bullets). Use a case study if it fits.
-3. Credibility woven in once, naturally — "31 years in the mortgage business" (never forced, never a pitch)
-4. Soft close, chosen by the Community field in the request:
-   - Reddit or BiggerPockets: invite a direct message, e.g. "Hope this helps — feel free to DM me if you have any questions or want to talk through your specific situation."
-   - Stack Exchange (no DM feature): a brief offer to help further WITHOUT mentioning DMs, e.g. "Happy to clarify any of this if it's helpful."
-5. Signature: exactly "Jim Driscoll" on its own line — name only, no title, company, location, or contact details.
-
-Hard rules — never break:
-- Never include contact info, urls, company names, or product/tool names (see CRITICAL above).
-- Never mention competing lenders by name.
+Hard rules, never break:
 - Never lead with a pitch.
+- Never mention competing lenders by name.
 - Never invent case studies or numbers beyond the three above.
 - Never give specific rate quotes (compliance).
 - Never claim approval guarantees.
 - Match community tone: Reddit casual/direct, BiggerPockets technical, Stack Exchange precise/educational.
 - Do not include any preamble like "Here is a draft." Output the reply text only.
 `.trim();
+
+// The exact signature block appended to non-Reddit drafts. Single source of
+// truth so the body text and any tests stay in sync.
+const SIGNATURE_BLOCK = `Jim Driscoll
+Mortgage Equity Partners
+617-529-9007 | jim@meploans.com
+https://mortgageequitypartners.com/james-driscoll/
+NMLS #21420`;
+
+type ContactPolicy = "no-contact" | "with-contact";
+
+// Platforms we EXPLICITLY know how to handle and that should carry Jim's full
+// signature block. Reddit is deliberately absent (it gets the contact-free
+// template). Anything not matched here AND not Reddit falls through to the
+// safer no-contact template and logs a warning, so a brand-new source can
+// never silently start emitting Jim's phone/email/NMLS until we add a rule.
+const KNOWN_CONTACT_SOURCES = [
+  "biggerpockets",
+  "bigger pockets",
+  "stackexchange",
+  "stack exchange",
+  "facebook",
+  "nextdoor",
+  "quora",
+  "linkedin"
+];
+
+// Decide the contact policy from the lead's community/source fields.
+// Detection is on BOTH fields because the scouts populate them differently:
+// Reddit sets community="Reddit" but source=the subreddit (e.g. "r/Mortgages"),
+// so matching source alone would miss every Reddit lead.
+function resolveContactPolicy(community: string, source: string): ContactPolicy {
+  const hay = `${community} ${source}`.toLowerCase();
+  if (hay.includes("reddit")) return "no-contact";
+  if (KNOWN_CONTACT_SOURCES.some((s) => hay.includes(s))) return "with-contact";
+  console.warn(
+    `[drafter] Unrecognized lead source (community="${community}", source="${source}"). ` +
+      "Defaulting to the safer no-contact template. Add it to KNOWN_CONTACT_SOURCES " +
+      "in lib/drafter.ts if this platform should include Jim's signature."
+  );
+  return "no-contact";
+}
+
+// FUTURE ENHANCEMENT (not built): a more conservative non-Reddit policy would
+// include the full signature ONLY when the post explicitly asks for a
+// recommendation / referral / lender contact ("anyone know a good lender?"),
+// and otherwise sign with a one-liner like "- Jim, mortgage LO". Safer for
+// BiggerPockets' anti-solicitation enforcement, but adds intent-detection
+// complexity. For now we send the full signature on all non-Reddit sources.
+
+// Build the system prompt: shared base profile + the platform-specific
+// contact rules.
+function buildSystemPrompt(policy: ContactPolicy, platformLabel: string): string {
+  const contactSection =
+    policy === "with-contact"
+      ? `
+You are drafting a response to a ${platformLabel} post. After your helpful answer, end with this exact signature block. Separate it from the body with a blank line and a "---" divider line on its own, then the signature exactly as written:
+
+---
+${SIGNATURE_BLOCK}
+
+Signature rules:
+- Reproduce the block exactly: same lines, same order, same phone, email, URL, company name, and NMLS number. Do not paraphrase or reformat it.
+- The signature is the ONLY place contact details appear. Keep the body a clean expert answer with no phone, email, URL, or company name scattered in it.
+- Place the signature only at the very end, as a clear sign-off. Do not add anything after it.`.trim()
+      : `
+You are drafting a response to a ${platformLabel} post. The response must NOT include any contact information, signatures, phone numbers, email addresses, websites, company names, or invitations to DM. Just answer the question helpfully and end the response naturally, the way a knowledgeable peer would end it, not like a sales pitch.
+
+Specifically:
+- No phone number, no email, no website or URL, no company name (e.g. "Mortgage Equity Partners"), no product or tool name.
+- No "feel free to reach out" or "happy to help" tied to any contact mechanism, and no DM invitation of any kind.
+- No signature block. Do not even sign off with "Jim". End on the substance of the answer.`.trim();
+
+  return `${JIM_BASE_PROFILE}\n\n${contactSection}`;
+}
 
 export interface DraftRequest {
   community: string;
@@ -63,6 +132,12 @@ export async function draftResponse(req: DraftRequest): Promise<DraftResult> {
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set");
 
   const client = new Anthropic({ apiKey });
+
+  // Platform-aware contact policy: Reddit (and any unrecognized source) gets a
+  // contact-free reply; known non-Reddit sources get Jim's full signature.
+  const policy = resolveContactPolicy(req.community, req.source);
+  const platformLabel = req.community || req.source || "community";
+  const system = buildSystemPrompt(policy, platformLabel);
 
   const userPrompt = `
 Community: ${req.community}
@@ -88,7 +163,7 @@ Return a JSON object with these exact keys (no markdown fences, no commentary):
   const msg = await client.messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 2048,
-    system: JIM_PROFILE,
+    system,
     messages: [{ role: "user", content: userPrompt }]
   });
 
