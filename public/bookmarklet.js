@@ -1,10 +1,12 @@
-// SocialScopeIQ bookmarklet
-// Runs when the user clicks the bookmark on a third-party page (Facebook, NextDoor, Quora, LinkedIn, etc.).
-// Tries to detect the post automatically. If detection fails, prompts the user.
+/* SocialScopeIQ bookmarklet.
+   Runs when the user clicks the bookmark on a third-party page (Facebook, NextDoor,
+   Quora, LinkedIn, etc.). Tries to detect the post automatically; falls back to the
+   user's text selection, then to a prompt.
+   NOTE: no line comments in this file — the /bookmarklet page collapses it to one
+   line, and a stray "//" (comment or not) would break the packed string. */
 (function () {
-  var API = "https://socialscopeiq.com/api/bookmarklet";
+  var API = "https://www.socialscopeiq.com/api/bookmarklet";
 
-  // Best-effort detection. Each site has different DOM. We fall back to selection / prompt.
   function detectCommunity() {
     var h = location.hostname.toLowerCase();
     if (h.indexOf("facebook.com") !== -1) return "Facebook";
@@ -16,9 +18,10 @@
     return "Manual";
   }
 
+  var selection = (window.getSelection() ? String(window.getSelection()) : "").trim();
+
   function getSelectedOr(selectors) {
-    var sel = (window.getSelection() || "").toString().trim();
-    if (sel) return sel;
+    if (selection) return selection;
     for (var i = 0; i < selectors.length; i++) {
       var el = document.querySelector(selectors[i]);
       if (el && el.textContent && el.textContent.trim()) {
@@ -30,12 +33,25 @@
 
   var community = detectCommunity();
   var url = location.href;
+  var pageTitle = document.title || "";
 
-  // Try to pull a sensible title and body from common patterns.
-  var detectedTitle =
-    document.querySelector("meta[property='og:title']")?.getAttribute("content") ||
-    document.title ||
-    "";
+  var ogTitleEl = document.querySelector("meta[property='og:title']");
+  var detectedTitle = (ogTitleEl && ogTitleEl.getAttribute("content")) || pageTitle;
+  var detectedAuthor = "";
+
+  if (community === "LinkedIn") {
+    /* LinkedIn's DOM has no stable selectors, but post pages title themselves
+       "<Author> on LinkedIn: <text>" — parse that for author + title. On generic
+       pages ("Feed | LinkedIn" etc.) fall back to the user's selection. */
+    var liMatch = pageTitle.match(/^(.+?) on LinkedIn: ?(.*)$/);
+    if (liMatch) {
+      detectedAuthor = liMatch[1].replace(/^\(\d+\)\s*/, "").trim();
+      if (liMatch[2].trim()) detectedTitle = liMatch[2].trim();
+    } else if (/\| LinkedIn$/.test(pageTitle) && selection) {
+      detectedTitle = selection;
+    }
+  }
+
   var detectedBody = getSelectedOr([
     "[role='article']",
     "main article",
@@ -45,11 +61,11 @@
     ".question-text"
   ]).slice(0, 4000);
 
-  // Show a small confirm dialog so the user can clean it up before POST.
+  /* Small confirm dialog so the user can clean it up before POST. */
   var title = prompt("Post title (edit if needed):", detectedTitle.slice(0, 240)) || "";
   if (!title) return;
 
-  var author = prompt("Author (or 'Unknown'):", "") || "Unknown";
+  var author = prompt("Author (or 'Unknown'):", detectedAuthor) || "Unknown";
 
   var body = prompt(
     "Post body (a sentence or two is fine — used for tier classification + drafting):",
@@ -57,7 +73,7 @@
   ) || "";
 
   var sourceGuess =
-    community === "Facebook" ? (document.title || "Facebook group") :
+    community === "Facebook" ? (pageTitle || "Facebook group") :
     community === "NextDoor" ? "NextDoor" :
     community === "Quora" ? "Quora question" :
     community === "LinkedIn" ? "LinkedIn post" :

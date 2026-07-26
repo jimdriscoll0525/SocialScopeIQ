@@ -9,9 +9,10 @@ export default async function BookmarkletPage() {
   const packed =
     "javascript:" +
     encodeURIComponent(
+      // Only /* */ comments are stripped — a line-comment regex would also eat
+      // the "https://" API URL. bookmarklet.js must not use // comments.
       file
         .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/\/\/[^\n]*\n/g, "\n")
         .replace(/\s+/g, " ")
         .trim()
     );
@@ -33,7 +34,8 @@ export default async function BookmarkletPage() {
       <ol className="mt-2 list-decimal space-y-2 pl-5 text-neutral-700">
         <li>Drag the button above onto your browser&apos;s bookmarks bar.</li>
         <li>Browse Facebook groups, NextDoor, Quora, LinkedIn — any site where you spot a real mortgage question.</li>
-        <li>Click the bookmark. A small dialog will pop up to confirm capture details.</li>
+        <li>Open the post (or highlight its text with your mouse), then click the bookmark. Highlighting first helps on sites like LinkedIn where automatic detection is unreliable.</li>
+        <li>A small dialog will pop up to confirm capture details.</li>
         <li>Submit. The lead lands in your dashboard with an AI-drafted response ready to review.</li>
       </ol>
       <h2 className="mt-8 text-lg font-semibold">Manual capture</h2>
