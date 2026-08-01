@@ -222,17 +222,26 @@ const TIER1_PATTERNS = [
 ];
 
 const TIER2_PATTERNS = [
-  /pre-approval/i,
+  /pre[- ]?approv/i, // pre-approval, preapproval, preapproved
   /rates today/i,
   /refinance calculator/i,
-  /heloc vs cash[- ]out/i,
+  /\bheloc\b/i,
+  /home equity (loan|line)/i,
   /fha vs conventional/i,
   /looking to buy in massachusetts/i,
   /first investment property/i,
-  /down payment assistance/i,
+  /down payment/i,
   /cash[- ]out refi/i,
   /multifamily underwriting/i,
-  /funding (first|or deal)/i
+  /funding (first|or deal)/i,
+  /first[- ]?time (home ?buyer|buyer)/i,
+  /\bhome loan\b/i,
+  /fixer[- ]?upper/i,
+  /renovation (loan|mortgage)/i,
+  /homestyle/i,
+  /closing costs/i,
+  /\bpmi\b/i,
+  /how much (house|home|mortgage) can (i|we) afford/i
 ];
 
 const TIER3_PATTERNS = [

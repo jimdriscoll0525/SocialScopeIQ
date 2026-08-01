@@ -7,7 +7,10 @@ import { detectState, shouldKeepLead } from "@/lib/state-filter";
 import type { LeadInsert, ScoutResult } from "@/lib/types";
 
 // Cap on auto-drafted leads per run, to keep API costs bounded.
-const MAX_DRAFTS = 10;
+// Raised 10 -> 20 in Aug 2026 when the subreddit list and tier patterns were
+// broadened and out-of-state leads started being kept (for referral to
+// partner LOs); each draft is a single Sonnet call (a few cents).
+const MAX_DRAFTS = 20;
 
 export interface ScoutSummary {
   sources: {
@@ -16,7 +19,7 @@ export interface ScoutSummary {
     stackexchange: number | string;
   };
   matched: number;
-  oos_dropped: number;
+  oos_kept: number;
   fresh: number;
   drafted: number;
   inserted: number;
@@ -47,11 +50,13 @@ export async function runScout(): Promise<ScoutSummary> {
     .map((c) => ({ ...c, intent_tier: classifyTier(`${c.post_title}\n${c.body}`) }))
     .filter((c): c is ScoutResult & { intent_tier: NonNullable<ReturnType<typeof classifyTier>> } => c.intent_tier !== null);
 
-  // 2a. State filter — drop clear out-of-state leads, tag the rest.
+  // 2a. State detection — tag every lead; nothing is dropped anymore
+  // (out-of-state leads are kept for referral to partner LOs and ranked
+  // last below, so they only consume draft slots licensed leads don't need).
   const stateFiltered = tiered
     .map((t) => ({ ...t, state_result: detectState({ text: `${t.post_title}\n${t.body}`, community: t.community, source: t.source }) }))
     .filter((t) => shouldKeepLead(t.state_result));
-  const oosDropped = tiered.length - stateFiltered.length;
+  const oosKept = stateFiltered.filter((t) => t.state_result.state === "OUT_OF_STATE").length;
 
   // 3. De-duplicate against the DB (skip URLs we've already saved).
   const urls = stateFiltered.map((t) => t.post_url);
@@ -62,12 +67,14 @@ export async function runScout(): Promise<ScoutSummary> {
   const existingSet = new Set((existing || []).map((r) => r.post_url));
   const fresh = stateFiltered.filter((t) => !existingSet.has(t.post_url));
 
-  // 4. Rank: licensed-state Tier 1s first, then licensed Tier 2/3, then unknown-state, capped to MAX_DRAFTS.
+  // 4. Rank: licensed states first, unknown-state next, out-of-state last
+  // (referral candidates), with tier order within each group. Capped to
+  // MAX_DRAFTS, so OOS leads only get slots licensed leads don't fill.
   const tierOrder = { "TIER 1": 0, "TIER 2": 1, "TIER 3": 2 } as const;
+  const statePriority = (s: string) => (s === "OUT_OF_STATE" ? 2 : s === "UNKNOWN" ? 1 : 0);
   fresh.sort((a, b) => {
-    const aLicensed = a.state_result.state !== "UNKNOWN" ? 0 : 1;
-    const bLicensed = b.state_result.state !== "UNKNOWN" ? 0 : 1;
-    if (aLicensed !== bLicensed) return aLicensed - bLicensed;
+    const sp = statePriority(a.state_result.state) - statePriority(b.state_result.state);
+    if (sp !== 0) return sp;
     return tierOrder[a.intent_tier] - tierOrder[b.intent_tier];
   });
   const toDraft = fresh.slice(0, MAX_DRAFTS);
@@ -122,7 +129,7 @@ export async function runScout(): Promise<ScoutSummary> {
       stackexchange: se.status === "fulfilled" ? se.value.length : `error: ${(se as PromiseRejectedResult).reason}`
     },
     matched: tiered.length,
-    oos_dropped: oosDropped,
+    oos_kept: oosKept,
     fresh: fresh.length,
     drafted: toDraft.length,
     inserted,

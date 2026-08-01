@@ -2,9 +2,15 @@ import type { ScoutResult } from "../types";
 
 // National mortgage / real-estate subreddits only. Local subs (r/boston,
 // r/massachusetts, ...) were dropped — they proved too noisy in testing.
+// Subreddit names verified to exist 2026-08 (NewbHomebuyer, FirstTimeHomeBuyers,
+// HomeLoans, HELOC added at Jim's request — he was seeing leads there manually).
 const SUBREDDITS = [
   "FirstTimeHomeBuyer",
+  "FirstTimeHomeBuyers",
+  "NewbHomebuyer",
   "Mortgages",
+  "HomeLoans",
+  "HELOC",
   "RealEstate",
   "RealEstateInvesting",
   "Homeowners",

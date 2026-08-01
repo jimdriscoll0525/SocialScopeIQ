@@ -1,9 +1,9 @@
-// State detection for routing leads to licensed markets only.
+// State detection for prioritizing leads by licensed market.
 // Licensed states for Jim: MA, NH, RI, NJ, ME, CT, FL.
 // Approach: scan post text for state names, abbreviations (with location context to avoid false positives),
-// and well-known cities. Reject leads whose ONLY detected state is non-licensed. Keep leads where:
-//   - a licensed state is detected (even if other states also mentioned)
-//   - no state is detected at all (mark as "unknown" — Jim decides)
+// and well-known cities. As of Aug 2026 NO lead is rejected for being out-of-state —
+// Jim refers OOS borrowers to partner loan officers licensed in those states. Detection
+// is used for tagging (detected_state) and ranking: licensed first, unknown next, OOS last.
 
 export const LICENSED_STATES = ["MA", "NH", "RI", "NJ", "ME", "CT", "FL"] as const;
 export type LicensedState = (typeof LICENSED_STATES)[number];
@@ -161,8 +161,11 @@ export function detectState(opts: {
   return { state: "UNKNOWN", detected: [], oos: [], reason: "no state references found" };
 }
 
-// Final go/no-go gate for the scout.
-// Returns false ONLY for clear OOS leads. Licensed and unknown both pass.
-export function shouldKeepLead(result: StateDetectionResult): boolean {
-  return result.state !== "OUT_OF_STATE";
+// Final go/no-go gate for the scout. As of Aug 2026 everything passes:
+// out-of-state leads are kept (tagged OUT_OF_STATE, ranked last in
+// run-scout) because Jim refers them to partner LOs licensed in those
+// states. Kept as a function so the gate has one place to live if the
+// policy ever tightens again.
+export function shouldKeepLead(_result: StateDetectionResult): boolean {
+  return true;
 }
