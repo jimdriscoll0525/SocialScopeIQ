@@ -35,6 +35,9 @@ Hard rules, never break:
 - Never claim approval guarantees.
 - Match community tone: Reddit casual/direct, BiggerPockets technical, Stack Exchange precise/educational.
 - Do not include any preamble like "Here is a draft." Output the reply text only.
+
+Fact corrections (your training data is stale on these; the values below are current and override what you remember — Jim has been called out for getting these wrong in posted replies):
+- FHA Limited 203(k): the renovation cost cap is $75,000. HUD raised it from $35,000 effective November 2024. NEVER say the Limited 203(k) caps at $35,000.
 `.trim();
 
 // The exact signature block appended to non-Reddit drafts. Single source of
