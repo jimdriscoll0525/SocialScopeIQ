@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { HUMANIZER_RULES } from "./humanizer";
 import type { IntentTier, ScoutResult } from "./types";
 
 // Jim's identity, specialties, case studies, and the voice/structure rules
@@ -44,16 +45,17 @@ Mortgage Equity Partners
 https://mortgageequitypartners.com/james-driscoll/
 NMLS #21420`;
 
-type ContactPolicy = "no-contact" | "with-contact";
+type ContactPolicy = "no-contact" | "with-contact" | "name-only";
 
 // Platforms we EXPLICITLY know how to handle and that should carry Jim's full
 // signature block. Reddit is deliberately absent (it gets the contact-free
-// template). Anything not matched here AND not Reddit falls through to the
-// safer no-contact template and logs a warning, so a brand-new source can
-// never silently start emitting Jim's phone/email/NMLS until we add a rule.
+// template), and BiggerPockets is handled separately (name-only signature —
+// its anti-solicitation enforcement is strict, so drafts end with just
+// "Jim Driscoll" and zero contact info). Anything not matched here AND not
+// Reddit/BiggerPockets falls through to the safer no-contact template and
+// logs a warning, so a brand-new source can never silently start emitting
+// Jim's phone/email/NMLS until we add a rule.
 const KNOWN_CONTACT_SOURCES = [
-  "biggerpockets",
-  "bigger pockets",
   "stackexchange",
   "stack exchange",
   "facebook",
@@ -69,6 +71,7 @@ const KNOWN_CONTACT_SOURCES = [
 function resolveContactPolicy(community: string, source: string): ContactPolicy {
   const hay = `${community} ${source}`.toLowerCase();
   if (hay.includes("reddit")) return "no-contact";
+  if (hay.includes("biggerpockets") || hay.includes("bigger pockets")) return "name-only";
   if (KNOWN_CONTACT_SOURCES.some((s) => hay.includes(s))) return "with-contact";
   console.warn(
     `[drafter] Unrecognized lead source (community="${community}", source="${source}"). ` +
@@ -86,10 +89,19 @@ function resolveContactPolicy(community: string, source: string): ContactPolicy 
 // complexity. For now we send the full signature on all non-Reddit sources.
 
 // Build the system prompt: shared base profile + the platform-specific
-// contact rules.
+// contact rules + the humanizer style rules (every platform, single pass).
 function buildSystemPrompt(policy: ContactPolicy, platformLabel: string): string {
   const contactSection =
-    policy === "with-contact"
+    policy === "name-only"
+      ? `
+You are drafting a response to a ${platformLabel} post. This platform strictly enforces anti-solicitation rules, so the response must NOT include contact information of any kind: no phone number, no email, no website or URL, no company name (e.g. "Mortgage Equity Partners"), no NMLS number, no product or tool name, and no invitation to DM or reach out. People who want to reach Jim will look him up.
+
+End the response with Jim's full name alone on its own line, exactly:
+
+Jim Driscoll
+
+Nothing before it on that line and nothing after it. No divider, no title, no company, no "Best," or other valediction. Just the helpful answer, then a blank line, then "Jim Driscoll".`.trim()
+      : policy === "with-contact"
       ? `
 You are drafting a response to a ${platformLabel} post. After your helpful answer, end with this exact signature block. Separate it from the body with a blank line and a "---" divider line on its own, then the signature exactly as written:
 
@@ -108,7 +120,7 @@ Specifically:
 - No "feel free to reach out" or "happy to help" tied to any contact mechanism, and no DM invitation of any kind.
 - No signature block. Do not even sign off with "Jim". End on the substance of the answer.`.trim();
 
-  return `${JIM_BASE_PROFILE}\n\n${contactSection}`;
+  return `${JIM_BASE_PROFILE}\n\n${contactSection}\n\n${HUMANIZER_RULES}`;
 }
 
 export interface DraftRequest {
