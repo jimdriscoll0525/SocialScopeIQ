@@ -139,6 +139,7 @@ export async function POST(req: Request) {
     author: payload.author || "Unknown",
     post_url: payload.post_url,
     post_body: (payload.body || "").slice(0, 4000),
+    group_url: payload.group_url || null,
     intent_tier: tier,
     primary_intent: draft.primary_intent,
     key_question: draft.key_question,
@@ -164,6 +165,27 @@ export async function POST(req: Request) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders() });
   }
+
+  // Group Map: capturing from inside a Facebook group proves membership, so
+  // auto-mark it joined. Never fails the capture.
+  if (payload.group_url || payload.group_name) {
+    const groupName = (payload.group_name || payload.source || "").trim().slice(0, 200);
+    if (groupName) {
+      const { error: groupErr } = await supabase.from("fb_groups").upsert(
+        {
+          user_id: profile.id,
+          group_name: groupName,
+          group_url: payload.group_url || null,
+          status: "joined",
+          source: "capture",
+          last_capture_at: now.toISOString()
+        },
+        { onConflict: "user_id,group_name" }
+      );
+      if (groupErr) console.warn("[bookmarklet] fb_groups upsert failed:", groupErr.message);
+    }
+  }
+
   return NextResponse.json(
     { status: "inserted", id: data.id, tier },
     { status: 200, headers: corsHeaders() }

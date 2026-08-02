@@ -45,6 +45,7 @@ export interface Lead {
   author: string | null;
   post_url: string | null;
   post_body: string | null;
+  group_url: string | null;
   intent_tier: IntentTier | null;
   primary_intent: string | null;
   key_question: string | null;
@@ -64,9 +65,10 @@ export interface Lead {
 
 export type LeadInsert = Omit<
   Lead,
-  "id" | "created_at" | "updated_at" | "response_status" | "followup_status" | "feeds" | "claimed_by" | "claimed_at" | "claimed_draft" | "post_body"
+  "id" | "created_at" | "updated_at" | "response_status" | "followup_status" | "feeds" | "claimed_by" | "claimed_at" | "claimed_draft" | "post_body" | "group_url"
 > & {
   post_body?: string | null;
+  group_url?: string | null;
   response_status?: ResponseStatus;
   followup_status?: FollowupStatus;
   feeds?: FeedName[]; // DB default is '{lo}'
@@ -74,6 +76,22 @@ export type LeadInsert = Omit<
   claimed_at?: string | null;
   claimed_draft?: string | null;
 };
+
+export type FbGroupStatus = "joined" | "candidate" | "ignored";
+export type FbGroupSource = "capture" | "suggested" | "manual";
+
+export interface FbGroup {
+  id: string;
+  user_id: string;
+  group_name: string;
+  group_url: string | null;
+  status: FbGroupStatus;
+  source: FbGroupSource;
+  why: string | null;
+  last_capture_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export type BlogPostStatus = "draft" | "published";
 
