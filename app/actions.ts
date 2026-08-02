@@ -2,6 +2,7 @@
 
 import { runScout } from "@/lib/run-scout";
 import type { ScoutSummary } from "@/lib/run-scout";
+import { getSessionUser } from "@/lib/supabase/server";
 
 // Manual-trigger guards. These live HERE (not in runScout) on purpose, so
 // the daily cron — which calls runScout() directly — is never throttled
@@ -17,6 +18,10 @@ export type TriggerResult =
   | { ok: false; reason: string };
 
 export async function triggerScout(): Promise<TriggerResult> {
+  const { user } = await getSessionUser();
+  if (!user) {
+    return { ok: false, reason: "Not signed in." };
+  }
   if (running) {
     return { ok: false, reason: "A scout run is already in progress." };
   }

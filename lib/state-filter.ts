@@ -75,11 +75,19 @@ const SUBREDDIT_TO_STATE: Record<string, LicensedState | "UNKNOWN"> = {
   "r/florida": "FL"
 };
 
-// BiggerPockets forum names that map to states (from our scout configuration).
+// BiggerPockets forum names that map to states (from our scout configuration —
+// labels in scout_sources / lib/sources.ts must match these exactly).
 const FORUM_TO_STATE: Record<string, LicensedState> = {
   "Massachusetts Real Estate": "MA",
-  "Boston Real Estate": "MA"
+  "Boston Real Estate": "MA",
+  "New Hampshire Real Estate": "NH"
 };
+
+// Case-insensitive subreddit lookup (Apify community names can vary in case).
+const SUBREDDIT_TO_STATE_LC: Record<string, LicensedState | "UNKNOWN"> =
+  Object.fromEntries(
+    Object.entries(SUBREDDIT_TO_STATE).map(([k, v]) => [k.toLowerCase(), v])
+  );
 
 const WORD_BOUNDARY_AROUND = (s: string) => new RegExp(`(?:^|[^a-zA-Z])${s}(?:[^a-zA-Z]|$)`, "i");
 
@@ -110,7 +118,7 @@ export function detectState(opts: {
 
   // 1. Strong signal: source/forum tells us the state directly.
   if (opts.community === "Reddit" && opts.source) {
-    const subState = SUBREDDIT_TO_STATE[opts.source];
+    const subState = SUBREDDIT_TO_STATE_LC[opts.source.toLowerCase()];
     if (subState && subState !== "UNKNOWN") {
       return { state: subState, detected: [subState], oos: [], reason: `posted in ${opts.source}` };
     }

@@ -2,10 +2,14 @@
    Runs when the user clicks the bookmark on a third-party page (Facebook, NextDoor,
    Quora, LinkedIn, etc.). Tries to detect the post automatically; falls back to the
    user's text selection, then to a prompt.
+   The __SSIQ_TOKEN__ placeholder is replaced with the signed-in user's capture
+   token when the /bookmarklet page packs this file, so captures land under the
+   right account (session cookies don't ride along on cross-site POSTs).
    NOTE: no line comments in this file — the /bookmarklet page collapses it to one
    line, and a stray "//" (comment or not) would break the packed string. */
 (function () {
   var API = "https://www.socialscopeiq.com/api/bookmarklet";
+  var TOKEN = "__SSIQ_TOKEN__";
 
   function detectCommunity() {
     var h = location.hostname.toLowerCase();
@@ -52,6 +56,22 @@
     }
   }
 
+  /* Facebook group detection: /groups/<id-or-slug>/... in the path. The group
+     name comes from the page title minus the "(3) " unread counter and the
+     " | Facebook" suffix. Feeds the Group Map (auto-mark joined / candidate). */
+  var groupUrl = "";
+  var groupName = "";
+  if (community === "Facebook") {
+    var gm = location.pathname.match(/\/groups\/([^\/?#]+)/);
+    if (gm && gm[1] && gm[1] !== "feed" && gm[1] !== "discover" && gm[1] !== "joins") {
+      groupUrl = "https://www.facebook.com/groups/" + gm[1] + "/";
+      groupName = pageTitle
+        .replace(/^\(\d+\)\s*/, "")
+        .replace(/\s*\|\s*Facebook\s*$/i, "")
+        .trim();
+    }
+  }
+
   var detectedBody = getSelectedOr([
     "[role='article']",
     "main article",
@@ -73,7 +93,7 @@
   ) || "";
 
   var sourceGuess =
-    community === "Facebook" ? (pageTitle || "Facebook group") :
+    community === "Facebook" ? (groupName || pageTitle || "Facebook group") :
     community === "NextDoor" ? "NextDoor" :
     community === "Quora" ? "Quora question" :
     community === "LinkedIn" ? "LinkedIn post" :
@@ -82,12 +102,15 @@
   var source = prompt("Source (group name / topic):", sourceGuess) || sourceGuess;
 
   var payload = {
+    token: TOKEN,
     community: community,
     source: source,
     post_title: title,
     post_url: url,
     author: author,
-    body: body
+    body: body,
+    group_url: groupUrl,
+    group_name: groupName || source
   };
 
   fetch(API, {
@@ -95,9 +118,12 @@
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   })
-    .then(function (r) { return r.json(); })
-    .then(function (j) {
-      if (j.status === "inserted") {
+    .then(function (r) { return r.json().then(function (j) { return { status: r.status, json: j }; }); })
+    .then(function (res) {
+      var j = res.json;
+      if (res.status === 401) {
+        alert("SocialScopeIQ: this bookmarklet is out of date. Sign in and re-drag it from the Bookmarklet page.");
+      } else if (j.status === "inserted") {
         alert("Captured to SocialScopeIQ (tier " + j.tier + "). Open the dashboard to review.");
       } else if (j.status === "exists") {
         alert("Already captured — see the dashboard.");

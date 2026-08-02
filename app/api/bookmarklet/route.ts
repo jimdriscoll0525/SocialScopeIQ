@@ -1,23 +1,28 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { classifyTier, draftResponse } from "@/lib/drafter";
+import { classifyTier, draftResponse, buildDrafterProfile } from "@/lib/drafter";
 import { detectState } from "@/lib/state-filter";
-import type { LeadInsert } from "@/lib/types";
+import type { LeadInsert, Profile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 interface BookmarkletPayload {
+  token: string;           // per-user capture token (bookmarklet_tokens)
   community: string;       // "Facebook", "NextDoor", "Quora", "LinkedIn", "Manual"
   source: string;          // group name / topic / sub
   post_title: string;
   post_url: string;
   author: string;
   body: string;
+  group_url?: string;      // Facebook group URL, when captured inside a group
+  group_name?: string;     // Facebook group name (used by Group Map inference, Phase 4)
 }
 
 // CORS — the bookmarklet runs in a third-party page (facebook.com, nextdoor.com, etc.)
-// and POSTs to this endpoint, so we have to allow cross-origin.
+// and POSTs to this endpoint, so we have to allow cross-origin. Session cookies
+// do NOT ride along cross-site, which is why auth is a per-user token in the
+// payload instead.
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
@@ -39,14 +44,47 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400, headers: corsHeaders() });
   }
 
+  const supabase = supabaseAdmin();
+
+  // Resolve the capture token to a user + profile. 401 with a hint the
+  // bookmarklet alert() surfaces, so stale bookmarklets tell the user how to fix.
+  if (!payload.token) {
+    return NextResponse.json(
+      { error: "missing token — re-drag the bookmarklet from the /bookmarklet page" },
+      { status: 401, headers: corsHeaders() }
+    );
+  }
+  const { data: tokenRow } = await supabase
+    .from("bookmarklet_tokens")
+    .select("user_id")
+    .eq("token", payload.token)
+    .maybeSingle();
+  if (!tokenRow) {
+    return NextResponse.json(
+      { error: "invalid token — re-drag the bookmarklet from the /bookmarklet page" },
+      { status: 401, headers: corsHeaders() }
+    );
+  }
+  const { data: profileRow } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", tokenRow.user_id)
+    .maybeSingle();
+  if (!profileRow) {
+    return NextResponse.json(
+      { error: "no profile for token — finish onboarding first" },
+      { status: 401, headers: corsHeaders() }
+    );
+  }
+  const profile = profileRow as Profile;
+  const isRealtor = profile.role === "realtor";
+
   if (!payload.post_url || !payload.post_title) {
     return NextResponse.json(
       { error: "post_url and post_title are required" },
       { status: 400, headers: corsHeaders() }
     );
   }
-
-  const supabase = supabaseAdmin();
 
   // Idempotency — same URL captured twice just returns the existing row.
   const { data: existing } = await supabase
@@ -61,7 +99,11 @@ export async function POST(req: Request) {
     );
   }
 
-  const tier = classifyTier(`${payload.post_title}\n${payload.body}`) || "TIER 2";
+  // Manual captures always insert: the user already judged it a lead.
+  // LO captures use the regex tiers; realtor captures default to TIER 2.
+  const tier = isRealtor
+    ? ("TIER 2" as const)
+    : classifyTier(`${payload.post_title}\n${payload.body}`) || ("TIER 2" as const);
 
   let draft = {
     primary_intent: "Manual capture",
@@ -70,21 +112,25 @@ export async function POST(req: Request) {
     drafted_response: ""
   };
   try {
-    draft = await draftResponse({
-      community: payload.community,
-      source: payload.source,
-      post_title: payload.post_title,
-      author: payload.author || "Unknown",
-      body: payload.body,
-      intent_tier: tier
-    });
+    draft = await draftResponse(
+      {
+        community: payload.community,
+        source: payload.source,
+        post_title: payload.post_title,
+        author: payload.author || "Unknown",
+        body: payload.body,
+        intent_tier: tier
+      },
+      buildDrafterProfile(profile)
+    );
   } catch (err) {
     console.warn("[bookmarklet] draft failed:", err);
   }
 
   const now = new Date();
   const lead: LeadInsert = {
-    user_id: null,
+    user_id: profile.id,
+    feeds: isRealtor ? ["realtor"] : ["lo"],
     date_found: now.toISOString().slice(0, 10),
     time_found: now.toISOString().slice(11, 16) + " UTC",
     community: payload.community,
@@ -92,11 +138,19 @@ export async function POST(req: Request) {
     post_title: payload.post_title,
     author: payload.author || "Unknown",
     post_url: payload.post_url,
+    post_body: (payload.body || "").slice(0, 4000),
     intent_tier: tier,
     primary_intent: draft.primary_intent,
     key_question: draft.key_question,
     reason_selected: draft.reason_selected,
-    drafted_response: draft.drafted_response,
+    // Role decides which draft column the response lives in: realtors work
+    // out of claimed_draft (their personalized draft), LOs out of
+    // drafted_response. Realtor captures are auto-claimed by the capturer so
+    // they land in their dashboard, not the shared pool.
+    drafted_response: isRealtor ? "" : draft.drafted_response,
+    claimed_by: isRealtor ? profile.id : null,
+    claimed_at: isRealtor ? now.toISOString() : null,
+    claimed_draft: isRealtor ? draft.drafted_response : null,
     response_link: null,
     notes: "Captured via bookmarklet.",
     detected_state: detectState({

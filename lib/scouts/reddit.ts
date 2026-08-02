@@ -1,22 +1,12 @@
 import type { ScoutResult } from "../types";
+import { getSources } from "../sources";
 
-// National mortgage / real-estate subreddits only. Local subs (r/boston,
-// r/massachusetts, ...) were dropped — they proved too noisy in testing.
-// Subreddit names verified to exist 2026-08 (NewbHomebuyer, FirstTimeHomeBuyers,
-// HomeLoans, HELOC added at Jim's request — he was seeing leads there manually).
-const SUBREDDITS = [
-  "FirstTimeHomeBuyer",
-  "FirstTimeHomeBuyers",
-  "NewbHomebuyer",
-  "Mortgages",
-  "HomeLoans",
-  "HELOC",
-  "RealEstate",
-  "RealEstateInvesting",
-  "Homeowners",
-  "HomeBuying",
-  "personalfinance"
-];
+// Subreddit list now lives in the scout_sources table (union of the LO and
+// realtor pipelines — one merged Apify run serves both feeds; classification
+// in run-scout.ts routes each post). lib/sources.ts falls back to the
+// pre-migration hardcoded list if the table is empty or unreachable.
+// Local subs (r/boston, ...) are realtor-pipeline sources: they were too
+// noisy for the LO feed, which the per-post routing now handles.
 
 // 48-hour freshness cutoff (matches the old Reddit scout + the Daily Lead
 // Scout spec). With the read-last / trigger-next pattern below, the posts we
@@ -78,9 +68,9 @@ interface ApifyRedditPost {
 
 // The actor input used when we kick off a run. Async, so the ~7-min wall-clock
 // time no longer competes with our function budget.
-function buildInput() {
+function buildInput(subreddits: string[]) {
   return {
-    startUrls: SUBREDDITS.map((s) => ({ url: `https://www.reddit.com/r/${s}/new/` })),
+    startUrls: subreddits.map((s) => ({ url: `https://www.reddit.com/r/${s}/new/` })),
     sort: "new",
     skipComments: true,
     skipUserPosts: true,
@@ -90,7 +80,7 @@ function buildInput() {
     searchCommunities: false,
     searchUsers: false,
     maxPostCount: MAX_PER_SUB,
-    maxItems: SUBREDDITS.length * MAX_PER_SUB,
+    maxItems: subreddits.length * MAX_PER_SUB,
     includeNSFW: false, // actor defaults this to true — opt out explicitly
     proxy: { useApifyProxy: true, apifyProxyGroups: ["RESIDENTIAL"] }
   };
@@ -183,7 +173,7 @@ async function readLastSucceededRun(token: string): Promise<ScoutResult[]> {
 // Start a fresh async run for the next cycle — unless one is already in
 // progress, or a run started within the cooldown window. Best-effort: any
 // failure is a no-op (we still returned this cycle's results from the read).
-async function maybeTriggerRun(token: string): Promise<void> {
+async function maybeTriggerRun(token: string, subreddits: string[]): Promise<void> {
   const last = (await apifyJson(token, `/acts/${ACTOR_ID}/runs/last`)) as
     | { data?: { status?: string; startedAt?: string } | null }
     | null;
@@ -200,9 +190,11 @@ async function maybeTriggerRun(token: string): Promise<void> {
 
   const started = await apifyJson(token, `/acts/${ACTOR_ID}/runs`, {
     method: "POST",
-    body: JSON.stringify(buildInput())
+    body: JSON.stringify(buildInput(subreddits))
   });
-  if (started) console.log("[reddit] kicked off a new Apify run for next cycle");
+  if (started) {
+    console.log(`[reddit] kicked off a new Apify run for next cycle (${subreddits.length} subs)`);
+  }
 }
 
 export async function scoutReddit(): Promise<ScoutResult[]> {
@@ -213,8 +205,9 @@ export async function scoutReddit(): Promise<ScoutResult[]> {
   }
 
   try {
+    const subreddits = (await getSources("reddit")).map((s) => s.identifier);
     const results = await readLastSucceededRun(token);
-    await maybeTriggerRun(token); // fast — returns once Apify accepts the run
+    await maybeTriggerRun(token, subreddits); // fast — returns once Apify accepts the run
     return results;
   } catch (err) {
     // Defensive backstop: the helpers already swallow their own errors, but

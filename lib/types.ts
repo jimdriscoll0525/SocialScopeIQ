@@ -3,9 +3,40 @@ export type ResponseStatus = "DRAFT" | "POSTED" | "REPLIED" | "ENGAGED" | "IGNOR
 export type FollowupStatus = "NOT STARTED" | "IN PROGRESS" | "DONE";
 export type DetectedStateValue = "MA" | "NH" | "RI" | "NJ" | "ME" | "CT" | "FL" | "UNKNOWN" | "OUT_OF_STATE";
 
+export type Role = "loan_officer" | "realtor";
+export type FeedName = "lo" | "realtor";
+
+export interface Profile {
+  id: string;
+  role: Role;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string | null;
+  slug: string;
+  states_served: string[];
+  towns_served: string[];
+  niche: string | null;
+  voice_sample: string | null;
+  website: string | null;
+  company: string | null;
+  nmls: string | null;
+  license_states: string[] | null;
+  brokerage: string | null;
+  license_numbers: string[] | null;
+  case_studies: string | null;
+  is_admin: boolean;
+  plan: string;
+  custom_blog_limit: number;
+  onboarding_complete: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Lead {
   id: string;
   user_id: string | null;
+  feeds: FeedName[];
   date_found: string;
   time_found: string | null;
   community: string | null;
@@ -13,6 +44,7 @@ export interface Lead {
   post_title: string | null;
   author: string | null;
   post_url: string | null;
+  post_body: string | null;
   intent_tier: IntentTier | null;
   primary_intent: string | null;
   key_question: string | null;
@@ -23,13 +55,24 @@ export interface Lead {
   followup_status: FollowupStatus;
   notes: string | null;
   detected_state: DetectedStateValue | null;
+  claimed_by: string | null;
+  claimed_at: string | null;
+  claimed_draft: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export type LeadInsert = Omit<Lead, "id" | "created_at" | "updated_at" | "response_status" | "followup_status"> & {
+export type LeadInsert = Omit<
+  Lead,
+  "id" | "created_at" | "updated_at" | "response_status" | "followup_status" | "feeds" | "claimed_by" | "claimed_at" | "claimed_draft" | "post_body"
+> & {
+  post_body?: string | null;
   response_status?: ResponseStatus;
   followup_status?: FollowupStatus;
+  feeds?: FeedName[]; // DB default is '{lo}'
+  claimed_by?: string | null;
+  claimed_at?: string | null;
+  claimed_draft?: string | null;
 };
 
 export interface ScoutResult {

@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState, useTransition } from "react";
+import { claimLead } from "@/app/(app)/lead-actions";
 import type { Lead, ResponseStatus, FollowupStatus } from "@/lib/types";
 
 const STATUS_OPTIONS: ResponseStatus[] = ["DRAFT", "POSTED", "REPLIED", "ENGAGED", "IGNORED"];
@@ -8,14 +9,51 @@ const FOLLOWUP_OPTIONS: FollowupStatus[] = ["NOT STARTED", "IN PROGRESS", "DONE"
 const STATE_OPTIONS = ["ALL", "LICENSED ONLY", "MA", "NH", "RI", "NJ", "ME", "CT", "FL", "UNKNOWN", "OUT_OF_STATE"];
 const LICENSED_STATES = new Set(["MA", "NH", "RI", "NJ", "ME", "CT", "FL"]);
 
-export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
+export default function LeadsTable({
+  initialLeads,
+  variant = "lo",
+  currentUserId
+}: {
+  initialLeads: Lead[];
+  variant?: "lo" | "realtor";
+  currentUserId?: string;
+}) {
+  const isRealtor = variant === "realtor";
   const [leads, setLeads] = useState<Lead[]>(initialLeads);
   const [tier, setTier] = useState<string>("ALL");
   const [status, setStatus] = useState<string>("ALL");
   const [community, setCommunity] = useState<string>("ALL");
   const [stateFilter, setStateFilter] = useState<string>("LICENSED ONLY");
+  const [claimFilter, setClaimFilter] = useState<string>("ALL");
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [claiming, startClaim] = useTransition();
+
+  // The draft a given viewer works with: realtors get their claim-time draft
+  // (claimed_draft), loan officers the scout/bookmarklet draft.
+  const draftOf = (l: Lead) => (isRealtor ? l.claimed_draft || "" : l.drafted_response || "");
+  const draftField = isRealtor ? "claimed_draft" : "drafted_response";
+
+  function claim(id: string) {
+    startClaim(async () => {
+      const res = await claimLead(id);
+      if (res.ok) {
+        setLeads((prev) =>
+          prev.map((l) =>
+            l.id === id
+              ? { ...l, claimed_by: res.claimed_by, claimed_at: res.claimed_at, claimed_draft: res.claimed_draft ?? l.claimed_draft }
+              : l
+          )
+        );
+        flash("Lead claimed — it's yours now.");
+      } else if (res.reason === "already_claimed") {
+        setLeads((prev) => prev.filter((l) => l.id !== id));
+        flash("Too late — another agent claimed this one.");
+      } else {
+        flash(`Claim failed: ${res.reason}`);
+      }
+    });
+  }
 
   const communities = useMemo(() => {
     const s = new Set<string>();
@@ -33,6 +71,8 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
       } else if (stateFilter !== "ALL" && l.detected_state !== stateFilter) {
         return false;
       }
+      if (isRealtor && claimFilter === "AVAILABLE" && l.claimed_by) return false;
+      if (isRealtor && claimFilter === "MINE" && l.claimed_by !== currentUserId) return false;
       if (query) {
         const q = query.toLowerCase();
         const hay = `${l.post_title || ""} ${l.author || ""} ${l.key_question || ""} ${l.primary_intent || ""}`.toLowerCase();
@@ -40,12 +80,13 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
       }
       return true;
     });
-  }, [leads, tier, status, community, stateFilter, query]);
+  }, [leads, tier, status, community, stateFilter, claimFilter, query, isRealtor, currentUserId]);
 
   async function copyResponse(lead: Lead) {
-    if (!lead.drafted_response) return;
+    const text = draftOf(lead);
+    if (!text) return;
     try {
-      await navigator.clipboard.writeText(lead.drafted_response);
+      await navigator.clipboard.writeText(text);
       flash(`Copied draft for ${lead.author || "lead"}`);
     } catch {
       flash("Copy failed — select & copy manually.");
@@ -80,6 +121,9 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
         <Select label="Tier" value={tier} onChange={setTier} options={["ALL", "TIER 1", "TIER 2", "TIER 3"]} />
         <Select label="Status" value={status} onChange={setStatus} options={["ALL", ...STATUS_OPTIONS]} />
         <Select label="Community" value={community} onChange={setCommunity} options={["ALL", ...communities]} />
+        {isRealtor && (
+          <Select label="Show" value={claimFilter} onChange={setClaimFilter} options={["ALL", "AVAILABLE", "MINE"]} />
+        )}
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -102,15 +146,17 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
               <th className="px-3 py-2">Intent</th>
               <th className="px-3 py-2">Status</th>
               <th className="px-3 py-2">Follow-up</th>
+              {isRealtor && <th className="px-3 py-2">Claim</th>}
               <th className="px-3 py-2"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-100">
             {filtered.map((l) => {
               const isOpen = expanded === l.id;
+              const isMine = isRealtor && l.claimed_by === currentUserId;
               return (
-                <>
-                  <tr key={l.id} className="hover:bg-neutral-50">
+                <Fragment key={l.id}>
+                  <tr className="hover:bg-neutral-50">
                     <td className="px-3 py-2 align-top text-neutral-600">{l.date_found}</td>
                     <td className="px-3 py-2 align-top">
                       <StateBadge state={l.detected_state} />
@@ -157,6 +203,23 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
                         {FOLLOWUP_OPTIONS.map((s) => <option key={s}>{s}</option>)}
                       </select>
                     </td>
+                    {isRealtor && (
+                      <td className="px-3 py-2 align-top">
+                        {isMine ? (
+                          <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                            Mine
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => claim(l.id)}
+                            disabled={claiming}
+                            className="rounded bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                          >
+                            Claim
+                          </button>
+                        )}
+                      </td>
+                    )}
                     <td className="px-3 py-2 align-top">
                       <div className="flex gap-1">
                         <button
@@ -176,14 +239,14 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
                   </tr>
                   {isOpen && (
                     <tr className="bg-neutral-50">
-                      <td colSpan={10} className="px-3 py-4">
+                      <td colSpan={isRealtor ? 11 : 10} className="px-3 py-4">
                         <div className="grid gap-4 md:grid-cols-2">
                           <Field label="Key question" value={l.key_question} />
                           <Field label="Reason selected" value={l.reason_selected} />
                           <FieldEditable
-                            label="Drafted response"
-                            value={l.drafted_response || ""}
-                            onSave={(v) => patch(l.id, { drafted_response: v })}
+                            label={isRealtor ? "Your draft" : "Drafted response"}
+                            value={draftOf(l)}
+                            onSave={(v) => patch(l.id, { [draftField]: v })}
                             rows={14}
                             withCopy
                           />
@@ -205,12 +268,12 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               );
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-3 py-12 text-center text-neutral-500">
+                <td colSpan={isRealtor ? 11 : 10} className="px-3 py-12 text-center text-neutral-500">
                   No leads match those filters.
                 </td>
               </tr>

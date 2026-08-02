@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 
-function reqEnv(key: string): string {
+export function reqEnv(key: string): string {
   const v = process.env[key];
   if (!v) throw new Error(`${key} is not set`);
   return v;

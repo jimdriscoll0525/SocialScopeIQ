@@ -6,7 +6,11 @@ export const maxDuration = 300; // 5 min — covers slow scraping + drafting
 
 function requireCronAuth(req: Request): boolean {
   const secret = process.env.CRON_SECRET;
-  if (!secret) return true; // no secret configured — allow (dev mode)
+  if (!secret) {
+    // Fail closed in production: a deploy missing CRON_SECRET must not expose
+    // this endpoint. Local dev without the var stays convenient.
+    return process.env.NODE_ENV !== "production";
+  }
   const auth = req.headers.get("authorization") || "";
   return auth === `Bearer ${secret}`;
 }

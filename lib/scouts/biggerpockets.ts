@@ -1,24 +1,22 @@
 import type { ScoutResult } from "../types";
+import { getSources } from "../sources";
 
-// BiggerPockets forums that produce mortgage/financing leads, in CRAWL-PRIORITY
-// order: the in-state MA/Boston forums first (they auto-tag to MA via the state
-// filter and are highest value), then the national forums that empirically
-// produce the most TIER 1 financing leads. Order matters because the crawler is
-// breadth-first under a page cap — earlier forums get covered first. An explicit
-// array is used (not an object) because integer-keyed objects iterate in numeric
-// order, which would ignore this priority.
-// The MA/Boston names MUST match lib/state-filter.ts FORUM_TO_STATE exactly.
-const FORUMS: { id: number; name: string }[] = [
-  { id: 564, name: "Massachusetts Real Estate" },
-  { id: 693, name: "Boston Real Estate" },
-  { id: 22, name: "Mortgage Brokers & Lenders" },
-  { id: 49, name: "Private & Conventional Lending" },
-  { id: 50, name: "Creative Real Estate Financing" },
-  { id: 311, name: "Buying & Selling Real Estate" },
-  { id: 517, name: "Rental Property Investing" },
-  { id: 12, name: "Starting Out" }
-];
-const FORUM_NAMES: Record<number, string> = Object.fromEntries(FORUMS.map((f) => [f.id, f.name]));
+// Forum list now lives in the scout_sources table (union of LO + realtor
+// pipelines, priority column = CRAWL order: the crawler is breadth-first
+// under a page cap, so earlier forums get covered first — MA/NH state forums
+// lead). lib/sources.ts falls back to the pre-migration hardcoded list if the
+// table is empty or unreachable.
+// State-forum labels MUST match lib/state-filter.ts FORUM_TO_STATE exactly.
+interface Forum {
+  id: number;
+  name: string;
+}
+
+function toForums(rows: { identifier: string; label: string | null }[]): Forum[] {
+  return rows
+    .map((r) => ({ id: Number(r.identifier), name: r.label || "BiggerPockets Forum" }))
+    .filter((f) => Number.isFinite(f.id) && f.id > 0);
+}
 
 // 7-day freshness window. BiggerPockets is slow-moving evergreen Q&A (threads
 // stay live for days), unlike Reddit's fast feed — a 48h cutoff would yield ~0.
@@ -58,9 +56,9 @@ interface WccItem {
 // "is this really a BP thread?" guard (skips the forum index + any stray page).
 const THREAD_RE = /biggerpockets\.com\/forums\/(\d+)\/topics\/(\d+)-/i;
 
-function buildInput() {
+function buildInput(forums: Forum[]) {
   return {
-    startUrls: FORUMS.map((f) => ({ url: `https://www.biggerpockets.com/forums/${f.id}` })),
+    startUrls: forums.map((f) => ({ url: `https://www.biggerpockets.com/forums/${f.id}` })),
     crawlerType: "playwright:firefox", // browser — needed to get past BP's bot defenses
     maxCrawlDepth: 1,                   // forum index -> thread pages
     maxCrawlPages: 60,                  // ~6-7 threads/forum; browser+residential ~13s/page,
@@ -131,7 +129,7 @@ function parsePostedAt(text: string): string {
 // Map one crawled page to a ScoutResult. Returns null for non-thread pages
 // (forum index, non-BP urls) and for pagination duplicates of a thread we've
 // already mapped (dedupe by threadId via the shared `seen` set).
-function toResult(item: WccItem, seen: Set<string>): ScoutResult | null {
+function toResult(item: WccItem, seen: Set<string>, forumNames: Record<number, string>): ScoutResult | null {
   const url = item.url;
   if (!url) return null;
   const m = url.match(THREAD_RE);
@@ -150,14 +148,14 @@ function toResult(item: WccItem, seen: Set<string>): ScoutResult | null {
     post_title: title,
     author: "Unknown", // BP doesn't expose a clean author handle in the page text
     community: "BiggerPockets",
-    source: FORUM_NAMES[forumId] || "BiggerPockets Forum",
+    source: forumNames[forumId] || "BiggerPockets Forum",
     body: (item.text || "").replace(/\s+/g, " ").trim().slice(0, 2000),
     posted_at: parsePostedAt(item.text || "")
   };
 }
 
 // Read + map the dataset of the most recent SUCCEEDED crawl. [] if none yet.
-async function readLastSucceededRun(token: string): Promise<ScoutResult[]> {
+async function readLastSucceededRun(token: string, forumNames: Record<number, string>): Promise<ScoutResult[]> {
   const run = (await apifyJson(token, `/acts/${ACTOR_ID}/runs/last?status=SUCCEEDED`)) as
     | { data?: { defaultDatasetId?: string } | null }
     | null;
@@ -177,7 +175,7 @@ async function readLastSucceededRun(token: string): Promise<ScoutResult[]> {
   const seen = new Set<string>();
   const results: ScoutResult[] = [];
   for (const item of items as WccItem[]) {
-    const r = toResult(item, seen);
+    const r = toResult(item, seen, forumNames);
     if (!r) continue;
     if (Date.parse(r.posted_at) < cutoffMs) continue; // older than the 7-day window
     results.push(r);
@@ -189,7 +187,7 @@ async function readLastSucceededRun(token: string): Promise<ScoutResult[]> {
 
 // Start a fresh crawl for next cycle — unless one is in progress or a crawl
 // started within the cooldown window. Best-effort; failures are no-ops.
-async function maybeTriggerRun(token: string): Promise<void> {
+async function maybeTriggerRun(token: string, forums: Forum[]): Promise<void> {
   const last = (await apifyJson(token, `/acts/${ACTOR_ID}/runs/last`)) as
     | { data?: { status?: string; startedAt?: string } | null }
     | null;
@@ -202,9 +200,9 @@ async function maybeTriggerRun(token: string): Promise<void> {
 
   const started = await apifyJson(token, `/acts/${ACTOR_ID}/runs`, {
     method: "POST",
-    body: JSON.stringify(buildInput())
+    body: JSON.stringify(buildInput(forums))
   });
-  if (started) console.log("[bp] kicked off a new crawl for next cycle");
+  if (started) console.log(`[bp] kicked off a new crawl for next cycle (${forums.length} forums)`);
 }
 
 export async function scoutBiggerPockets(): Promise<ScoutResult[]> {
@@ -215,8 +213,12 @@ export async function scoutBiggerPockets(): Promise<ScoutResult[]> {
   }
 
   try {
-    const results = await readLastSucceededRun(token);
-    await maybeTriggerRun(token); // fast — returns once Apify accepts the run
+    const forums = toForums(await getSources("biggerpockets"));
+    const forumNames: Record<number, string> = Object.fromEntries(
+      forums.map((f) => [f.id, f.name])
+    );
+    const results = await readLastSucceededRun(token, forumNames);
+    await maybeTriggerRun(token, forums); // fast — returns once Apify accepts the run
     return results;
   } catch (err) {
     // Defensive backstop: helpers already swallow errors; never let BP throw
