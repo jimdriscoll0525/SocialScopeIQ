@@ -32,7 +32,7 @@ async function main() {
     post_title: "Can I use a DSCR loan on a non-warrantable condo?",
     author: "Test Poster",
     body: "Found a condo in Salem MA that cash flows great but my lender says the building is non-warrantable (40% investor owned, litigation pending). Is DSCR my only option? What LTV should I expect?",
-    intent_tier: "TIER 1"
+    intent_tier: "TIER 1" as const
   };
 
   const redditPost = {
@@ -41,7 +41,7 @@ async function main() {
     post_title: "620 credit score, is FHA my only option?",
     author: "throwaway123",
     body: "I make 70k, have about 15k saved, credit is 620 because of some old collections. Everyone says FHA but the MI seems brutal. Do I have other options or should I wait and build credit?",
-    intent_tier: "TIER 2"
+    intent_tier: "TIER 2" as const
   };
 
   console.log("\n================ BIGGERPOCKETS DRAFT ================\n");

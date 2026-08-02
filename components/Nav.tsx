@@ -2,8 +2,8 @@ import Link from "next/link";
 import { signOut } from "@/app/login/actions";
 import type { Role } from "@/lib/types";
 
-// Authed app shell nav. Group Map (Phase 4) and Blog (Phase 5) links are added
-// with their features so we never render dead links.
+// Authed app shell nav. Group Map (Phase 4) link is added with its feature so
+// we never render dead links.
 export default function Nav({
   role,
   isAdmin,
@@ -28,6 +28,9 @@ export default function Nav({
             </Link>
             <Link href="/bookmarklet" className="text-neutral-600 hover:text-black">
               Bookmarklet
+            </Link>
+            <Link href="/blog" className="text-neutral-600 hover:text-black">
+              Blog
             </Link>
           </nav>
         </div>

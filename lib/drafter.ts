@@ -92,7 +92,7 @@ ${p.caseStudies.trim()}`;
 // Stale-training-data corrections shared by every LOAN OFFICER draft. This is
 // domain knowledge, not per-user data — extend the list here when the model
 // gets called out for an outdated fact in a posted reply.
-const LO_FACT_CORRECTIONS = `
+export const LO_FACT_CORRECTIONS = `
 Fact corrections (your training data is stale on these; the values below are current and override what you remember — loan officers have been called out for getting these wrong in posted replies):
 - FHA Limited 203(k): the renovation cost cap is $75,000. HUD raised it from $35,000 effective November 2024. NEVER say the Limited 203(k) caps at $35,000.`.trimEnd();
 

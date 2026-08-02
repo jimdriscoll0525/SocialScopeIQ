@@ -75,6 +75,23 @@ export type LeadInsert = Omit<
   claimed_draft?: string | null;
 };
 
+export type BlogPostStatus = "draft" | "published";
+
+export interface BlogPost {
+  id: string;
+  author_id: string;
+  slug: string;
+  title: string;
+  meta_description: string | null;
+  topic: string;
+  content_md: string;
+  is_custom: boolean;
+  status: BlogPostStatus;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ScoutResult {
   post_url: string;
   post_title: string;
