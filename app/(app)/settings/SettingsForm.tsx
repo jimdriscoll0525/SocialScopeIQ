@@ -9,7 +9,7 @@ const EXAMPLE_PLACEHOLDER = `- Equity lines (HELOCs) on investment properties up
 - Bank statement equity lines (self-employed, no tax returns needed)
 - DSCR equity lines and DSCR purchase/refinance loans (qualify on rental income, not personal income)
 - Non-QM: bank statement loans, asset depletion, recent credit events
-- Conventional, FHA, VA, jumbo
+- Conventional, FHA, VA, USDA, jumbo
 - MassHousing and Chenoa Fund down payment assistance
 - Land loans through a partner lender
 - Cash offer / no-contingency program for buyers
