@@ -24,6 +24,7 @@ export interface DrafterProfile {
   niche: string | null;
   voiceSample: string | null;
   caseStudies: string | null;
+  productsCapabilities: string | null;
 }
 
 export function buildDrafterProfile(row: Profile): DrafterProfile {
@@ -41,7 +42,8 @@ export function buildDrafterProfile(row: Profile): DrafterProfile {
     townsServed: row.towns_served || [],
     niche: row.niche,
     voiceSample: row.voice_sample,
-    caseStudies: row.case_studies
+    caseStudies: row.case_studies,
+    productsCapabilities: row.products_capabilities ?? null
   };
 }
 
@@ -63,7 +65,8 @@ export const JIM_FALLBACK_PROFILE: DrafterProfile = {
     "A mortgage loan officer with 31 years in the mortgage business, very low fallout rate, detail-oriented underwriting. Based in Massachusetts / New England.",
   caseStudies: `1. First-time buyer with no down payment, secured $75K in down payment assistance ($25K MassHousing + $50K City of Boston program).
 2. Investor seeking cash flow, carefully analyzed the deal up front; the client now has steady rental income.
-3. Refinance client saved $1,000+/month, modeled the savings carefully before executing.`
+3. Refinance client saved $1,000+/month, modeled the savings carefully before executing.`,
+  productsCapabilities: null
 };
 
 // ─── Base prompts (per role) ─────────────────────────────────────────────────
@@ -89,6 +92,19 @@ Real case studies (use only when the situation matches, paraphrase, never invent
 ${p.caseStudies.trim()}`;
 }
 
+// Optional per-user product/service list. Changes what the reply may talk
+// about, never the contact/signature rules. Omitted entirely when the user
+// hasn't filled it in, so drafting is unchanged for everyone else.
+function capabilitiesSection(p: DrafterProfile): string {
+  if (!p.productsCapabilities?.trim()) return "";
+  return `
+
+WHAT ${p.firstName.toUpperCase()} OFFERS (their real product/service list):
+${p.productsCapabilities.trim()}
+
+If the post is asking about, or would clearly be served by, something on this list, work the SINGLE most relevant item into the reply naturally: mention it is something ${p.firstName} does and briefly how it works, one or two sentences at most, placed after the person's actual question has been answered. Mention one item only, even when several could fit. If nothing on the list is relevant to the post, do not mention any of it. Never make it sound like an ad, and never claim a product or service that is not on the list.`;
+}
+
 // Stale-training-data corrections shared by every LOAN OFFICER draft. This is
 // domain knowledge, not per-user data — extend the list here when the model
 // gets called out for an outdated fact in a posted reply.
@@ -106,7 +122,7 @@ ${name}'s identity:
 - About them, in their own words (match this voice; use only these facts for credibility, never invent more): ${p.voiceSample?.trim() || "An experienced mortgage loan officer."}
 - Based in: ${territory(p)} (use only as context when a poster's location is relevant, never as a plug)
 - Specialties: ${p.niche?.trim() || "residential mortgage lending"}
-- Tone: Warm, professional, direct, data-driven, educational, approachable. Write like a knowledgeable person genuinely helping a stranger, not like a salesperson.${caseStudiesSection(p)}
+- Tone: Warm, professional, direct, data-driven, educational, approachable. Write like a knowledgeable person genuinely helping a stranger, not like a salesperson.${caseStudiesSection(p)}${capabilitiesSection(p)}
 
 Response approach (all tiers; ~120-350 words, lighter touch ~80-150 words for TIER 3):
 1. Answer the question first. Lead with real, expert value: insight, a framework, specific numbers, programs, or examples where they genuinely help. Use a case study only if it fits.
@@ -136,7 +152,7 @@ ${name}'s identity:
 - A real estate agent${p.brokerage ? ` with ${p.brokerage}` : ""} serving ${territory(p)}
 - About them, in their own words (match this voice; use only these facts for credibility, never invent more): ${p.voiceSample?.trim() || "A knowledgeable local real estate agent."}
 - Specialties: ${p.niche?.trim() || "residential real estate"}
-- Tone: Warm, local, plainspoken, genuinely helpful — a neighbor who knows the market, not a salesperson.${caseStudiesSection(p)}
+- Tone: Warm, local, plainspoken, genuinely helpful — a neighbor who knows the market, not a salesperson.${caseStudiesSection(p)}${capabilitiesSection(p)}
 
 Response approach (~80-250 words):
 1. Answer the actual question first with specific local insight: towns, commutes, process steps, what to expect — real substance, not generalities.

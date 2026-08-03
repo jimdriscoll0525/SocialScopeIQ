@@ -25,6 +25,7 @@ export interface Profile {
   brokerage: string | null;
   license_numbers: string[] | null;
   case_studies: string | null;
+  products_capabilities: string | null;
   is_admin: boolean;
   plan: string;
   custom_blog_limit: number;
