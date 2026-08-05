@@ -52,6 +52,7 @@ export interface Lead {
   key_question: string | null;
   reason_selected: string | null;
   drafted_response: string | null;
+  draft_blocked_reason: string | null;
   response_status: ResponseStatus;
   response_link: string | null;
   followup_status: FollowupStatus;
@@ -66,10 +67,11 @@ export interface Lead {
 
 export type LeadInsert = Omit<
   Lead,
-  "id" | "created_at" | "updated_at" | "response_status" | "followup_status" | "feeds" | "claimed_by" | "claimed_at" | "claimed_draft" | "post_body" | "group_url"
+  "id" | "created_at" | "updated_at" | "response_status" | "followup_status" | "feeds" | "claimed_by" | "claimed_at" | "claimed_draft" | "post_body" | "group_url" | "draft_blocked_reason"
 > & {
   post_body?: string | null;
   group_url?: string | null;
+  draft_blocked_reason?: string | null;
   response_status?: ResponseStatus;
   followup_status?: FollowupStatus;
   feeds?: FeedName[]; // DB default is '{lo}'

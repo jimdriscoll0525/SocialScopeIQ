@@ -12,6 +12,7 @@ import {
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Profile } from "@/lib/types";
 import { detectState, shouldKeepLead } from "@/lib/state-filter";
+import { isBlockedSubreddit } from "@/lib/compliance";
 import {
   passesRealtorPrefilter,
   classifyRealtorLead,
@@ -93,7 +94,15 @@ export async function runScout(): Promise<ScoutSummary> {
     ...(reddit.status === "fulfilled" ? reddit.value : []),
     ...(bp.status === "fulfilled" ? bp.value : []),
     ...(se.status === "fulfilled" ? se.value : [])
-  ];
+  ].filter((c) => {
+    // Blocklist gate on INGESTION: a blocked sub's post never becomes a lead,
+    // no matter how it got scraped.
+    if (isBlockedSubreddit(c.community, c.source)) {
+      console.warn(`[scout] dropping post from blocked subreddit: ${c.source} (${c.post_url})`);
+      return false;
+    }
+    return true;
+  });
 
   // 2. Tag every candidate: LO tier (regex) + detected state.
   const tagged = candidates.map((c) => ({
@@ -193,6 +202,7 @@ export async function runScout(): Promise<ScoutSummary> {
         key_question: draft.key_question,
         reason_selected: draft.reason_selected,
         drafted_response: draft.drafted_response,
+        draft_blocked_reason: draft.blocked_reason,
         response_link: null,
         notes: null,
         detected_state: c.state_result.state

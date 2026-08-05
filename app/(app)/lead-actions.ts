@@ -51,7 +51,10 @@ export async function claimLead(id: string): Promise<ClaimResult> {
         buildDrafterProfile(profileRow as Profile)
       );
       claimedDraft = draft.drafted_response;
-      await supabase.from("leads").update({ claimed_draft: claimedDraft }).eq("id", id);
+      await supabase
+        .from("leads")
+        .update({ claimed_draft: claimedDraft, draft_blocked_reason: draft.blocked_reason })
+        .eq("id", id);
     } else if (lead?.claimed_draft) {
       claimedDraft = lead.claimed_draft;
     }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { classifyTier, draftResponse, buildDrafterProfile } from "@/lib/drafter";
 import { detectState } from "@/lib/state-filter";
+import { isBlockedSubreddit } from "@/lib/compliance";
 import type { LeadInsert, Profile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -86,6 +87,15 @@ export async function POST(req: Request) {
     );
   }
 
+  // Blocklist gate on manual capture too — a blocked subreddit's post is
+  // rejected even when a human explicitly tries to capture it.
+  if (isBlockedSubreddit(payload.community || "", payload.source || "")) {
+    return NextResponse.json(
+      { error: `"${payload.source}" is on the compliance blocklist — this subreddit is off-limits.` },
+      { status: 422, headers: corsHeaders() }
+    );
+  }
+
   // Idempotency — same URL captured twice just returns the existing row.
   const { data: existing } = await supabase
     .from("leads")
@@ -109,7 +119,8 @@ export async function POST(req: Request) {
     primary_intent: "Manual capture",
     key_question: payload.post_title,
     reason_selected: "Captured via bookmarklet.",
-    drafted_response: ""
+    drafted_response: "",
+    blocked_reason: null as string | null
   };
   try {
     draft = await draftResponse(
@@ -149,6 +160,7 @@ export async function POST(req: Request) {
     // drafted_response. Realtor captures are auto-claimed by the capturer so
     // they land in their dashboard, not the shared pool.
     drafted_response: isRealtor ? "" : draft.drafted_response,
+    draft_blocked_reason: draft.blocked_reason,
     claimed_by: isRealtor ? profile.id : null,
     claimed_at: isRealtor ? now.toISOString() : null,
     claimed_draft: isRealtor ? draft.drafted_response : null,

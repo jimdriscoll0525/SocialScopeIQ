@@ -2,6 +2,7 @@
 
 import { Fragment, useMemo, useState, useTransition } from "react";
 import { claimLead } from "@/app/(app)/lead-actions";
+import { leadRedditPolicy, type SubredditPolicy } from "@/lib/compliance";
 import type { Lead, ResponseStatus, FollowupStatus } from "@/lib/types";
 
 const STATUS_OPTIONS: ResponseStatus[] = ["DRAFT", "POSTED", "REPLIED", "ENGAGED", "IGNORED"];
@@ -167,8 +168,17 @@ export default function LeadsTable({
                     <td className="px-3 py-2 align-top">
                       <div className="font-medium">{l.community}</div>
                       <div className="text-xs text-neutral-500">{l.source}</div>
+                      <PolicyBadge policy={leadRedditPolicy(l.community, l.source)} />
                     </td>
                     <td className="px-3 py-2 align-top">
+                      {l.draft_blocked_reason && (
+                        <span
+                          className="mr-2 rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-800"
+                          title={l.draft_blocked_reason}
+                        >
+                          DRAFT BLOCKED
+                        </span>
+                      )}
                       <button
                         className="text-left font-medium text-neutral-900 hover:underline"
                         onClick={() => setExpanded(isOpen ? null : l.id)}
@@ -240,6 +250,13 @@ export default function LeadsTable({
                   {isOpen && (
                     <tr className="bg-neutral-50">
                       <td colSpan={isRealtor ? 11 : 10} className="px-3 py-4">
+                        {l.draft_blocked_reason && (
+                          <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                            <span className="font-semibold">Draft blocked by the compliance sanitizer — do not post as-is.</span>{" "}
+                            Reason: {l.draft_blocked_reason}. Rewrite the draft below, removing the flagged
+                            content, before using it.
+                          </div>
+                        )}
                         <div className="grid gap-4 md:grid-cols-2">
                           <Field label="Key question" value={l.key_question} />
                           <Field label="Reason selected" value={l.reason_selected} />
@@ -282,6 +299,23 @@ export default function LeadsTable({
         </table>
       </div>
     </>
+  );
+}
+
+// Compliance policy badge for Reddit leads (see lib/compliance.ts).
+function PolicyBadge({ policy }: { policy: SubredditPolicy | null }) {
+  if (!policy) return null;
+  const styles =
+    policy === "BLOCKED"
+      ? "bg-red-100 text-red-800"
+      : policy === "STRICT_NO_PROMO"
+        ? "bg-amber-100 text-amber-800"
+        : "bg-neutral-100 text-neutral-600";
+  const label = policy === "STRICT_NO_PROMO" ? "STRICT" : policy;
+  return (
+    <span className={`mt-1 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${styles}`}>
+      {label}
+    </span>
   );
 }
 

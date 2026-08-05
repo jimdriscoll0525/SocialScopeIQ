@@ -1,5 +1,6 @@
 import type { ScoutResult } from "../types";
 import { getSources } from "../sources";
+import { isBlockedSubreddit } from "../compliance";
 
 // Subreddit list now lives in the scout_sources table (union of the LO and
 // realtor pipelines — one merged Apify run serves both feeds; classification
@@ -161,6 +162,10 @@ async function readLastSucceededRun(token: string): Promise<ScoutResult[]> {
     .filter((p) => !p.over18 && !p.isAd)
     .map(toResult)
     .filter((r): r is ScoutResult => r !== null)
+    // Blocklist gate on the READ path too: the last succeeded Apify dataset
+    // may predate a blocklist change and still contain posts from a sub we
+    // no longer touch (e.g. r/personalfinance).
+    .filter((r) => !isBlockedSubreddit(r.community, r.source))
     .filter((r) => {
       const created = Math.floor(Date.parse(r.posted_at) / 1000);
       return Number.isNaN(created) || nowSeconds - created <= CUTOFF_SECONDS;

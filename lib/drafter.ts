@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { HUMANIZER_RULES } from "./humanizer";
 import { DRAFT_MODEL } from "./config";
+import { isBlockedSubreddit, leadRedditPolicy, type SubredditPolicy } from "./compliance";
+import { sanitizeDraft } from "./sanitizer";
 import type { IntentTier, Profile, Role } from "./types";
 
 // ─── Drafter profiles ────────────────────────────────────────────────────────
@@ -237,6 +239,8 @@ function contactSection(policy: ContactPolicy, platformLabel: string, p: Drafter
     return `
 You are drafting a response to a ${platformLabel} post. This platform strictly enforces anti-solicitation rules, so the response must NOT include contact information of any kind: no phone number, no email, no website or URL, no company name${orgExample}, no NMLS or license number, no product or tool name, and no invitation to DM or reach out. People who want to reach ${p.firstName} will look them up.
 
+Additionally: no offers of service and no contact invitations of any kind — nothing like "happy to run numbers", "I can help", "reach out", or "DM me". Answer, then stop.
+
 End the response with ${p.firstName}'s full name alone on its own line, exactly:
 
 ${name}
@@ -267,19 +271,38 @@ You are drafting a response to a ${platformLabel} post, typically inside a local
   }
 
   return `
-You are drafting a response to a ${platformLabel} post. The response must NOT include any contact information, signatures, phone numbers, email addresses, websites, company names, or invitations to DM. Just answer the question helpfully and end the response naturally, the way a knowledgeable peer would end it, not like a sales pitch.
+You are drafting a response to a ${platformLabel} post. Write it as a knowledgeable individual sharing general information with a stranger — NEVER as a professional soliciting business. Communities like this one permanently ban accounts for self-promotion, and a single slip is unrecoverable.
 
-Specifically:
-- No phone number, no email, no website or URL, no company name${orgExample}, no product or tool name.
-- No "feel free to reach out" or "happy to help" tied to any contact mechanism, and no DM invitation of any kind.
-- No signature block. Do not even sign off with "${p.firstName}". End on the substance of the answer.`.trim();
+Hard rules:
+- No contact information of any kind: no phone number, no email, no website or URL, no company name${orgExample}, no product or tool name.
+- No credentials: no job title, no license or NMLS number, no "licensed in..." lists.
+- No offers of service: no "I can help", no "happy to run numbers", no "feel free to reach out", and no DM/message invitation of any kind.
+- No signature block. Do not even sign off with "${p.firstName}". End the reply on the substance of the answer, never on a call to action.
+- If a genuinely helpful answer requires recommending that the person talk to a professional, say "talk to a local loan officer or a HUD housing counselor" (or the equivalent generic professional) — NEVER reference ${p.firstName}, and never imply the reader could or should work with the author of the reply.`.trim();
+}
+
+// Extra rules for STRICT_NO_PROMO subreddits (and any unknown subreddit —
+// unknown defaults to strict in lib/compliance.ts). Overrides the base
+// profile's credibility-weaving instruction entirely.
+function strictNoPromoSection(p: DrafterProfile): string {
+  return `
+STRICT NO-PROMOTION COMMUNITY — these rules override everything above about credibility:
+- Do not mention ${p.firstName}'s job, title, credentials, licenses, years of experience, or that they work in the mortgage or real estate industry in ANY capacity. Not even softened forms like "in my experience working with buyers" or "my clients".
+- No first-person professional anecdotes. General knowledge only, stated plainly.
+- The reply must read like it was written by a well-informed private individual with no business interest in the topic.`.trim();
 }
 
 // Build the system prompt: role-specific base profile + the platform contact
-// rules + the humanizer style rules (every platform, single pass).
-function buildSystemPrompt(policy: ContactPolicy, platformLabel: string, p: DrafterProfile): string {
+// rules + strict-sub overrides where applicable + the humanizer style rules.
+function buildSystemPrompt(
+  policy: ContactPolicy,
+  platformLabel: string,
+  p: DrafterProfile,
+  redditPolicy: SubredditPolicy | null
+): string {
   const base = p.role === "realtor" ? buildRealtorBaseProfile(p) : buildLoBaseProfile(p);
-  return `${base}\n\n${contactSection(policy, platformLabel, p)}\n\n${HUMANIZER_RULES}`;
+  const strict = redditPolicy === "STRICT_NO_PROMO" ? `\n\n${strictNoPromoSection(p)}` : "";
+  return `${base}\n\n${contactSection(policy, platformLabel, p)}${strict}\n\n${HUMANIZER_RULES}`;
 }
 
 // ─── Drafting ────────────────────────────────────────────────────────────────
@@ -298,6 +321,10 @@ export interface DraftResult {
   primary_intent: string;
   key_question: string;
   reason_selected: string;
+  // Set by the post-generation sanitizer when the draft contains contact
+  // info, credentials, or solicitation language. A non-null value means DO
+  // NOT POST — the dashboard shows it as BLOCKED for manual rewrite.
+  blocked_reason: string | null;
 }
 
 export async function draftResponse(
@@ -307,11 +334,18 @@ export async function draftResponse(
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set");
 
+  // Blocklist gate on the DRAFTING path — a blocked subreddit's post must
+  // never be drafted, whatever upstream path let it through.
+  if (isBlockedSubreddit(req.community, req.source)) {
+    throw new Error(`Refusing to draft for blocklisted subreddit: ${req.source}`);
+  }
+
   const client = new Anthropic({ apiKey });
 
   const policy = resolveContactPolicy(req.community, req.source, profile.role);
+  const redditPolicy = leadRedditPolicy(req.community, req.source);
   const platformLabel = req.community || req.source || "community";
-  const system = buildSystemPrompt(policy, platformLabel, profile);
+  const system = buildSystemPrompt(policy, platformLabel, profile, redditPolicy);
 
   const userPrompt = `
 Community: ${req.community}
@@ -349,17 +383,46 @@ Return a JSON object with these exact keys (no markdown fences, no commentary):
   // Strip optional markdown fences if the model adds any.
   const cleaned = text.replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
 
+  let result: DraftResult;
   try {
-    return JSON.parse(cleaned) as DraftResult;
+    result = { ...(JSON.parse(cleaned) as Omit<DraftResult, "blocked_reason">), blocked_reason: null };
   } catch {
     // Fallback: stuff the whole text into drafted_response if JSON parsing fails.
-    return {
+    result = {
       primary_intent: req.intent_tier,
       key_question: req.post_title,
       reason_selected: "Auto-captured by scout.",
-      drafted_response: cleaned
+      drafted_response: cleaned,
+      blocked_reason: null
     };
   }
+
+  // Post-generation sanitizer — deterministic, runs regardless of what the
+  // model produced. Reddit gets the full rule set (strict unless the sub is
+  // explicitly STANDARD); BiggerPockets gets contact + solicitation rules.
+  const hay = `${req.community} ${req.source}`.toLowerCase();
+  const sanitizerPlatform = /reddit|(^|\s)\/?r\//.test(hay)
+    ? ("reddit" as const)
+    : /biggerpockets|bigger pockets/.test(hay)
+      ? ("biggerpockets" as const)
+      : null;
+  if (sanitizerPlatform && result.drafted_response) {
+    const check = sanitizeDraft(result.drafted_response, {
+      platform: sanitizerPlatform,
+      strict: sanitizerPlatform === "reddit" && redditPolicy !== "STANDARD",
+      profile: {
+        firstName: profile.firstName,
+        lastName: profile.lastName,
+        company: profile.company || profile.brokerage,
+        nmls: profile.nmls
+      }
+    });
+    if (check.blocked) {
+      result.blocked_reason = check.reasons.join("; ");
+    }
+  }
+
+  return result;
 }
 
 // ─── LO tier classifier (regex) ──────────────────────────────────────────────

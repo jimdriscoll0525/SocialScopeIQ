@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase";
+import { BLOCKED_SUBREDDITS, normalizeSubreddit } from "@/lib/compliance";
 
 export type SourcePipeline = "lo" | "realtor" | "both";
 
@@ -21,7 +22,7 @@ export const DEFAULT_REDDIT_SOURCES: ScoutSourceRow[] = [
   { identifier: "RealEstateInvesting", label: "r/RealEstateInvesting", pipeline: "lo" },
   { identifier: "Homeowners", label: "r/Homeowners", pipeline: "both" },
   { identifier: "HomeBuying", label: "r/HomeBuying", pipeline: "both" },
-  { identifier: "personalfinance", label: "r/personalfinance", pipeline: "lo" },
+  // r/personalfinance removed permanently (Rule 2 ban) — see lib/compliance.ts.
   { identifier: "SameGrassButGreener", label: "r/SameGrassButGreener", pipeline: "realtor" },
   { identifier: "boston", label: "r/boston", pipeline: "realtor" },
   { identifier: "massachusetts", label: "r/massachusetts", pipeline: "realtor" },
@@ -40,6 +41,17 @@ export const DEFAULT_BP_SOURCES: ScoutSourceRow[] = [
   { identifier: "12", label: "Starting Out", pipeline: "lo" }
 ];
 
+// Blocklist gate on the SCRAPER INPUT: even if a blocked sub reappears in the
+// scout_sources table (or the fallback list), it never reaches the scraper.
+function dropBlocked(platform: string, rows: ScoutSourceRow[]): ScoutSourceRow[] {
+  if (platform !== "reddit") return rows;
+  return rows.filter((r) => {
+    const blocked = BLOCKED_SUBREDDITS.includes(normalizeSubreddit(r.identifier));
+    if (blocked) console.warn(`[sources] refusing blocked subreddit "${r.identifier}"`);
+    return !blocked;
+  });
+}
+
 // Enabled sources for a platform, in priority order (BP crawl order depends
 // on it). Service-role read — the scouts run without a user session.
 export async function getSources(
@@ -54,9 +66,12 @@ export async function getSources(
       .order("priority", { ascending: true });
     if (error) throw new Error(error.message);
     if (!data || data.length === 0) throw new Error("no enabled rows");
-    return data as ScoutSourceRow[];
+    return dropBlocked(platform, data as ScoutSourceRow[]);
   } catch (err) {
     console.warn(`[sources] falling back to hardcoded ${platform} list:`, err);
-    return platform === "reddit" ? DEFAULT_REDDIT_SOURCES : DEFAULT_BP_SOURCES;
+    return dropBlocked(
+      platform,
+      platform === "reddit" ? DEFAULT_REDDIT_SOURCES : DEFAULT_BP_SOURCES
+    );
   }
 }
