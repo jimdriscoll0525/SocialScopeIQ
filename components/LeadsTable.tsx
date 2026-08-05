@@ -95,23 +95,41 @@ export default function LeadsTable({
   }
 
   async function patch(id: string, fields: Partial<Lead>) {
-    const optimistic = leads.map((l) => (l.id === id ? { ...l, ...fields } : l));
-    setLeads(optimistic);
+    // Functional updates + single-row revert: a stale `leads` snapshot here
+    // used to clobber other in-flight edits on failure.
+    let prev: Lead | undefined;
+    setLeads((cur) =>
+      cur.map((l) => {
+        if (l.id !== id) return l;
+        prev = l;
+        return { ...l, ...fields };
+      })
+    );
     const res = await fetch(`/api/leads?id=${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(fields)
     });
     if (!res.ok) {
-      flash("Save failed.");
-      setLeads(leads);
+      const body = await res.json().catch(() => null);
+      flash(`Save failed${body?.error ? ` — ${body.error}` : ""}. Refresh the page and try again.`);
+      setLeads((cur) => cur.map((l) => (l.id === id && prev ? prev : l)));
     }
   }
 
   async function remove(id: string) {
     if (!confirm("Delete this lead?")) return;
-    setLeads(leads.filter((l) => l.id !== id));
-    await fetch(`/api/leads?id=${id}`, { method: "DELETE" });
+    let removed: Lead | undefined;
+    setLeads((cur) => {
+      removed = cur.find((l) => l.id === id);
+      return cur.filter((l) => l.id !== id);
+    });
+    const res = await fetch(`/api/leads?id=${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      flash(`Delete failed${body?.error ? ` — ${body.error}` : ""}. Refresh the page and try again.`);
+      if (removed) setLeads((cur) => (cur.some((l) => l.id === id) ? cur : [...cur, removed!]));
+    }
   }
 
   return (
@@ -408,7 +426,7 @@ function Toast() {
     };
     window.addEventListener("ssiq-flash", (e: any) => {
       setMsg(e.detail);
-      setTimeout(() => setMsg(null), 1500);
+      setTimeout(() => setMsg(null), 3500);
     });
   }
   if (!msg) return null;
