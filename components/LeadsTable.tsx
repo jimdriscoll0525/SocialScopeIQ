@@ -5,7 +5,8 @@ import { claimLead } from "@/app/(app)/lead-actions";
 import { leadRedditPolicy, type SubredditPolicy } from "@/lib/compliance";
 import type { Lead, ResponseStatus, FollowupStatus } from "@/lib/types";
 
-const STATUS_OPTIONS: ResponseStatus[] = ["DRAFT", "POSTED", "REPLIED", "ENGAGED", "IGNORED"];
+// DELETED = the post was removed before a response went out.
+const STATUS_OPTIONS: ResponseStatus[] = ["DRAFT", "POSTED", "REPLIED", "ENGAGED", "IGNORED", "DELETED"];
 const FOLLOWUP_OPTIONS: FollowupStatus[] = ["NOT STARTED", "IN PROGRESS", "DONE"];
 const STATE_OPTIONS = ["ALL", "LICENSED ONLY", "MA", "NH", "RI", "NJ", "ME", "CT", "FL", "UNKNOWN", "OUT_OF_STATE"];
 const LICENSED_STATES = new Set(["MA", "NH", "RI", "NJ", "ME", "CT", "FL"]);
@@ -175,7 +176,7 @@ export default function LeadsTable({
               const isMine = isRealtor && l.claimed_by === currentUserId;
               return (
                 <Fragment key={l.id}>
-                  <tr className="hover:bg-neutral-50">
+                  <tr className={`hover:bg-neutral-50 ${l.response_status === "DELETED" ? "opacity-50" : ""}`}>
                     <td className="px-3 py-2 align-top text-neutral-600">{l.date_found}</td>
                     <td className="px-3 py-2 align-top">
                       <StateBadge state={l.detected_state} />

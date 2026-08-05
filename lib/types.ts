@@ -1,5 +1,5 @@
 export type IntentTier = "TIER 1" | "TIER 2" | "TIER 3";
-export type ResponseStatus = "DRAFT" | "POSTED" | "REPLIED" | "ENGAGED" | "IGNORED";
+export type ResponseStatus = "DRAFT" | "POSTED" | "REPLIED" | "ENGAGED" | "IGNORED" | "DELETED";
 export type FollowupStatus = "NOT STARTED" | "IN PROGRESS" | "DONE";
 export type DetectedStateValue = "MA" | "NH" | "RI" | "NJ" | "ME" | "CT" | "FL" | "UNKNOWN" | "OUT_OF_STATE";
 
