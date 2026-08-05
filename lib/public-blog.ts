@@ -18,6 +18,7 @@ export interface PublicProfile {
   towns_served: string[];
   nmls: string | null;
   website: string | null;
+  social_links: string[] | null;
 }
 
 export async function getPublicProfile(slug: string, role: Role): Promise<PublicProfile | null> {

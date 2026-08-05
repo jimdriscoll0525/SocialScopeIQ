@@ -26,6 +26,7 @@ export interface Profile {
   license_numbers: string[] | null;
   case_studies: string | null;
   products_capabilities: string | null;
+  social_links: string[] | null;
   is_admin: boolean;
   plan: string;
   custom_blog_limit: number;

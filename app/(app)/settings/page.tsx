@@ -18,6 +18,7 @@ export default async function SettingsPage() {
       </header>
       <SettingsForm
         initialProducts={profile.products_capabilities ?? ""}
+        initialLinks={profile.social_links ?? []}
         role={profile.role}
       />
     </main>
