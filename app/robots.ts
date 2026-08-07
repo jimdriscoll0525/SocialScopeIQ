@@ -10,7 +10,9 @@ function siteUrl(): string {
 // Public blog pages are crawlable; the authed app and APIs are not.
 export default function robots(): MetadataRoute.Robots {
   return {
-    rules: [{ userAgent: "*", allow: ["/lo/", "/agents/"], disallow: ["/api/", "/login", "/onboarding", "/bookmarklet", "/blog"] }],
+    // /blog/2-1-buydown is a public landing page; the more-specific allow
+    // wins over the /blog disallow (which covers the authed blog manager).
+    rules: [{ userAgent: "*", allow: ["/lo/", "/agents/", "/blog/2-1-buydown"], disallow: ["/api/", "/login", "/onboarding", "/bookmarklet", "/blog"] }],
     sitemap: `${siteUrl()}/sitemap.xml`
   };
 }

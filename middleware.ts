@@ -3,9 +3,11 @@ import { NextResponse, type NextRequest } from "next/server";
 
 // Refreshes the Supabase session cookie and gates every non-public route
 // behind sign-in. Public surface (excluded by the matcher below): /login,
-// /auth/*, the public blog pages (/agents/*, /lo/*), sitemap/robots, the
-// token- or secret-authenticated APIs (/api/bookmarklet, /api/scout,
-// /api/blog-cron), Next internals, and static files.
+// /auth/*, the public blog pages (/agents/*, /lo/*), the public landing page
+// /blog/2-1-buydown and its form endpoint /api/lead-capture (NOT /blog itself
+// — that's the authed blog manager), sitemap/robots, the token- or
+// secret-authenticated APIs (/api/bookmarklet, /api/scout, /api/blog-cron),
+// Next internals, and static files.
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
 
@@ -44,6 +46,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon\\.ico|login|auth(?:/|$)|agents(?:/|$)|lo(?:/|$)|sitemap\\.xml|robots\\.txt|api/bookmarklet|api/scout|api/blog-cron|.*\\.[\\w]+$).*)"
+    "/((?!_next/static|_next/image|favicon\\.ico|login|auth(?:/|$)|agents(?:/|$)|lo(?:/|$)|blog/2-1-buydown(?:/|$)|sitemap\\.xml|robots\\.txt|api/bookmarklet|api/scout|api/blog-cron|api/lead-capture(?:/|$)|.*\\.[\\w]+$).*)"
   ]
 };

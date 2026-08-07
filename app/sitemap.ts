@@ -33,7 +33,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ])
   );
 
-  const entries: MetadataRoute.Sitemap = [];
+  const entries: MetadataRoute.Sitemap = [
+    // Static public landing pages.
+    { url: `${base}/blog/2-1-buydown`, changeFrequency: "monthly" }
+  ];
   for (const p of profileById.values()) {
     entries.push({ url: `${base}${roleBasePath(p.role)}/${p.slug}`, changeFrequency: "weekly" });
   }
