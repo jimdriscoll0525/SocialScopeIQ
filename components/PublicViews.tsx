@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { roleBasePath, type PublicProfile } from "@/lib/public-blog";
 import type { BlogPost } from "@/lib/types";
 import LeadCaptureForm from "@/components/LeadCaptureForm";
@@ -174,6 +175,143 @@ export function ProfileView({ profile, posts }: { profile: PublicProfile; posts:
   );
 }
 
+// ---------------------------------------------------------------------------
+// In-body bar chart. Generated posts can emit a fenced code block tagged
+// `chart` whose body is JSON: {"title": "...", "unit": "$",
+// "bars": [{"label": "...", "value": 123}, ...], "footnote": "..."}.
+// Invalid JSON renders nothing rather than a broken block.
+
+interface ChartSpec {
+  title?: string;
+  unit?: string;
+  bars: Array<{ label: string; value: number }>;
+  footnote?: string;
+}
+
+function parseChartSpec(raw: string): ChartSpec | null {
+  try {
+    const spec = JSON.parse(raw) as ChartSpec;
+    if (!Array.isArray(spec.bars) || spec.bars.length < 2 || spec.bars.length > 6) return null;
+    if (!spec.bars.every((b) => typeof b.label === "string" && Number.isFinite(b.value) && b.value >= 0)) {
+      return null;
+    }
+    return spec;
+  } catch {
+    return null;
+  }
+}
+
+function fmtValue(v: number, unit: string): string {
+  const prefix = unit === "$" ? "$" : "";
+  const suffix = unit && unit !== "$" ? unit : "";
+  if (v >= 1_000_000) return `${prefix}${(v / 1_000_000).toLocaleString("en-US", { maximumFractionDigits: 2 })}M${suffix}`;
+  if (v >= 100_000) return `${prefix}${Math.round(v / 1000).toLocaleString("en-US")}k${suffix}`;
+  return `${prefix}${v.toLocaleString("en-US", { maximumFractionDigits: 0 })}${suffix}`;
+}
+
+function BlogChart({ spec }: { spec: ChartSpec }) {
+  const W = 640;
+  const H = 360;
+  const M = { top: spec.title ? 56 : 32, right: 20, bottom: 48, left: 68 };
+  const plotW = W - M.left - M.right;
+  const plotH = H - M.top - M.bottom;
+
+  const max = Math.max(...spec.bars.map((b) => b.value));
+  // Round the axis top up to a clean step so gridlines land on round numbers.
+  const rawStep = max / 4;
+  const pow = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * pow).find((s) => s * 4 >= max) || rawStep;
+  const yMax = step * 4;
+  const y = (v: number) => Math.round((M.top + plotH - (v / yMax) * plotH) * 10) / 10;
+
+  const n = spec.bars.length;
+  const slot = plotW / n;
+  const barW = Math.min(96, Math.round(slot * 0.62));
+  const unit = spec.unit || "";
+
+  const barPath = (x: number, top: number) => {
+    const r = 4;
+    const bottom = y(0);
+    if (bottom - top < r * 2) return `M ${x} ${bottom} H ${x + barW} V ${top} H ${x} Z`;
+    return `M ${x} ${bottom} V ${top + r} Q ${x} ${top} ${x + r} ${top} H ${x + barW - r} Q ${x + barW} ${top} ${x + barW} ${top + r} V ${bottom} Z`;
+  };
+
+  const desc = spec.bars.map((b) => `${b.label}: ${fmtValue(b.value, unit)}`).join(". ");
+
+  return (
+    <figure className="my-8 rounded-lg border border-neutral-200 p-4 sm:p-6">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${spec.title || "Bar chart"}. ${desc}`} className="w-full">
+        {spec.title ? (
+          <text x={M.left} y={24} fontSize={15} fontWeight={600} fill="#172554">
+            {spec.title}
+          </text>
+        ) : null}
+        {[0, 1, 2, 3, 4].map((i) => (
+          <g key={i}>
+            <line x1={M.left} x2={W - M.right} y1={y(step * i)} y2={y(step * i)} stroke="#e5e7eb" strokeWidth={1} />
+            <text x={M.left - 8} y={y(step * i) + 4} textAnchor="end" fontSize={12} fill="#6b7280">
+              {fmtValue(step * i, unit)}
+            </text>
+          </g>
+        ))}
+        {spec.bars.map((b, i) => {
+          const x = M.left + slot * i + (slot - barW) / 2;
+          const top = y(b.value);
+          const tall = y(0) - top > 34;
+          return (
+            <g key={b.label}>
+              <path d={barPath(x, top)} fill="#1e40af" />
+              <text
+                x={x + barW / 2}
+                y={tall ? top + 20 : top - 8}
+                textAnchor="middle"
+                fontSize={13}
+                fontWeight={600}
+                fill={tall ? "#ffffff" : "#374151"}
+              >
+                {fmtValue(b.value, unit)}
+              </text>
+              <text x={x + barW / 2} y={y(0) + 20} textAnchor="middle" fontSize={12.5} fill="#374151">
+                {b.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      {spec.footnote ? (
+        <figcaption className="mt-2 text-sm italic text-neutral-500">{spec.footnote}</figcaption>
+      ) : null}
+    </figure>
+  );
+}
+
+// Custom markdown renderers: chart code blocks, constrained images, and
+// horizontally-scrollable tables.
+const markdownComponents = {
+  pre: (props: React.HTMLAttributes<HTMLPreElement> & { children?: React.ReactNode }) => {
+    const child = props.children as React.ReactElement<{ className?: string; children?: React.ReactNode }> | undefined;
+    if (child?.props?.className?.includes("language-chart")) {
+      const spec = parseChartSpec(String(child.props.children || ""));
+      return spec ? <BlogChart spec={spec} /> : null;
+    }
+    return <pre {...props} />;
+  },
+  img: (props: React.ImgHTMLAttributes<HTMLImageElement>) => (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      {...props}
+      alt={props.alt || ""}
+      loading="lazy"
+      className="max-h-[420px] w-full rounded-lg object-cover"
+    />
+  ),
+  table: (props: React.TableHTMLAttributes<HTMLTableElement>) => (
+    <div className="overflow-x-auto">
+      <table {...props} />
+    </div>
+  )
+};
+
 export function PostView({ profile, post }: { profile: PublicProfile; post: BlogPost }) {
   const base = `${roleBasePath(profile.role)}/${profile.slug}`;
   const path = `${base}/${post.slug}`;
@@ -219,8 +357,10 @@ export function PostView({ profile, post }: { profile: PublicProfile; post: Blog
             <div className="mb-8 lg:hidden">
               <LeadCaptureForm sourcePage={path} />
             </div>
-            <div className="prose prose-neutral max-w-none prose-headings:font-serif prose-headings:text-blue-950 prose-a:text-blue-800">
-              <ReactMarkdown>{post.content_md}</ReactMarkdown>
+            <div className="prose prose-neutral max-w-none prose-headings:font-serif prose-headings:text-blue-950 prose-a:text-blue-800 prose-th:text-blue-950">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                {post.content_md}
+              </ReactMarkdown>
             </div>
           </article>
 
