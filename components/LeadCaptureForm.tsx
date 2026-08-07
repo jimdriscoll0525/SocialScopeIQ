@@ -6,9 +6,8 @@ import { useId, useState } from "react";
 // Rendered twice on that page (top-of-article on mobile + sticky sidebar), so
 // every field id comes from useId to keep labels valid.
 
-// Shown as a fallback contact if a submission errors. TODO(jim): put your
-// direct line here before launch; leave "" to show only the email fallback.
-const FALLBACK_PHONE: string = "";
+// Jim's direct line — shown on the card and as the error-state fallback.
+const FALLBACK_PHONE: string = "(617) 529-9007";
 const FALLBACK_EMAIL = "jim@financewithjim.com";
 
 type Status = "idle" | "submitting" | "success" | "error";
@@ -152,7 +151,17 @@ export default function LeadCaptureForm({
           </p>
         ) : null}
       </form>
-      <p className="mt-3 text-xs text-neutral-500">
+      <p className="mt-3 border-t border-neutral-200 pt-3 text-sm text-neutral-600">
+        Prefer to talk now? Call me directly at{" "}
+        <a
+          href={`tel:${FALLBACK_PHONE.replace(/\D/g, "")}`}
+          className="font-semibold text-blue-900 underline underline-offset-2"
+        >
+          {FALLBACK_PHONE}
+        </a>
+        .
+      </p>
+      <p className="mt-2 text-xs text-neutral-500">
         No spam, no obligation — just a conversation about your numbers.
       </p>
     </div>

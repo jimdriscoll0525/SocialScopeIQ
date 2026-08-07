@@ -487,7 +487,10 @@ export default function BuydownPage() {
         <div className="mx-auto max-w-6xl px-6 py-10 text-sm">
           <p className="font-serif text-base font-bold text-white">Jim Driscoll · Mortgage Equity Partners</p>
           <p className="mt-2 text-blue-200">
-            NMLS #21420 · Company NMLS #1936 · Equal Housing Opportunity
+            NMLS #21420 · Company NMLS #1936 · Equal Housing Opportunity ·{" "}
+            <a href="tel:6175299007" className="underline underline-offset-2 hover:text-white">
+              (617) 529-9007
+            </a>
           </p>
           <p className="mt-4 max-w-3xl text-xs leading-relaxed text-blue-300">
             This page is for educational purposes and does not constitute an offer of credit or a
