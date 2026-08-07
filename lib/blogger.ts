@@ -68,7 +68,8 @@ What a good post looks like:
 - Markdown. Use ## section headings (no top-level # heading; the title is rendered separately). Short paragraphs. Lists where they genuinely help.
 - Local when it helps: mention the towns and states ${p.firstName} serves where genuinely relevant. This is a local-SEO page; a reader in ${territory(p)} should feel it was written for their market. Do not force locality into every section.
 - Written from ${p.firstName}'s experience. First person is fine. Weave credibility in naturally, at most twice; never a sales pitch.
-- No contact information anywhere in the body: no phone, email, URL, or invitation to call. The page template renders an author card with contact details under every post.
+- Cite authoritative sources where they genuinely strengthen a claim: 1-3 inline markdown links per post to official government or consumer sites, placed on the sentence where the fact appears. Good examples: hud.gov (FHA), va.gov (VA loans), rd.usda.gov (USDA loans), consumerfinance.gov (CFPB consumer guidance), fanniemae.com / freddiemac.com (conforming guidelines), irs.gov (tax questions), fhfa.gov (loan limits), and official state agency sites. Only official/authoritative sites — never competitors, lead-gen sites, aggregators, or news articles. If you are not certain a deep URL exists, link the site's homepage or main topic page instead of guessing a path; a wrong link is worse than a general one.
+- No contact information anywhere in the body: no phone, email, or invitation to call, and no URLs other than the authoritative reference links described above. The page template renders an author card with contact details under every post.
 - End with a short practical wrap-up section, not a sales close. Do not sign the post or end with ${p.firstName}'s name; the byline and author card are rendered separately.
 ${complianceRules}
 

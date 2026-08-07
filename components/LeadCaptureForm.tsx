@@ -13,7 +13,16 @@ const FALLBACK_EMAIL = "jim@financewithjim.com";
 
 type Status = "idle" | "submitting" | "success" | "error";
 
-export default function LeadCaptureForm({ sourcePage }: { sourcePage: string }) {
+const DEFAULT_SUBTEXT =
+  "Have questions about your situation? Enter your info and I’ll personally give you a call.";
+
+export default function LeadCaptureForm({
+  sourcePage,
+  subtext = DEFAULT_SUBTEXT
+}: {
+  sourcePage: string;
+  subtext?: string;
+}) {
   const uid = useId();
   const [status, setStatus] = useState<Status>("idle");
   const [serverMessage, setServerMessage] = useState<string | null>(null);
@@ -68,10 +77,7 @@ export default function LeadCaptureForm({ sourcePage }: { sourcePage: string }) 
   return (
     <div className="rounded-xl border border-blue-900/15 bg-white p-6 shadow-sm">
       <h2 className="font-serif text-xl font-bold text-blue-950">Get Started Today</h2>
-      <p className="mt-1 text-sm text-neutral-600">
-        Wondering if a 2-1 buydown fits your situation? Enter your info and I&rsquo;ll personally
-        give you a call.
-      </p>
+      <p className="mt-1 text-sm text-neutral-600">{subtext}</p>
       <form onSubmit={onSubmit} className="mt-4 space-y-3" noValidate>
         <div>
           <label htmlFor={`${uid}-name`} className="block text-sm font-medium text-neutral-800">

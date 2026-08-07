@@ -1,10 +1,16 @@
 import Link from "next/link";
+import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import { roleBasePath, type PublicProfile } from "@/lib/public-blog";
 import type { BlogPost } from "@/lib/types";
+import LeadCaptureForm from "@/components/LeadCaptureForm";
+// Default post hero (free license, do not hotlink): Pexels #106399 by
+// Binyamin Mellish — same photo as the 2-1 buydown landing page hero.
+// https://www.pexels.com/photo/blue-and-gray-concrete-house-with-attic-during-twilight-106399/
+import blogHeroImg from "@/public/assets/blog-hero-default.jpg";
 
 // Server-rendered building blocks shared by the /lo/* and /agents/* public
-// pages. No auth, no client JS beyond what Next ships anyway.
+// pages. The lead form is the only client JS beyond what Next ships anyway.
 
 function fullName(p: PublicProfile): string {
   return `${p.first_name} ${p.last_name}`.trim();
@@ -170,6 +176,7 @@ export function ProfileView({ profile, posts }: { profile: PublicProfile; posts:
 
 export function PostView({ profile, post }: { profile: PublicProfile; post: BlogPost }) {
   const base = `${roleBasePath(profile.role)}/${profile.slug}`;
+  const path = `${base}/${post.slug}`;
   const postLd = {
     "@context": "https://schema.org",
     "@type": "BlogPosting",
@@ -177,27 +184,55 @@ export function PostView({ profile, post }: { profile: PublicProfile; post: Blog
     ...(post.meta_description ? { description: post.meta_description } : {}),
     ...(post.published_at ? { datePublished: post.published_at } : {}),
     dateModified: post.updated_at,
-    mainEntityOfPage: `${siteUrl()}${base}/${post.slug}`,
+    image: `${siteUrl()}/assets/blog-hero-default.jpg`,
+    mainEntityOfPage: `${siteUrl()}${path}`,
     author: personJsonLd(profile)
   };
   return (
-    <main className="mx-auto max-w-[720px] px-6 py-12">
+    <main className="bg-white text-neutral-800">
       <JsonLd data={postLd} />
-      <Link href={base} className="text-sm text-neutral-500 hover:text-black">
-        ← {fullName(profile)}
-      </Link>
-      <article className="mt-6">
-        <h1 className="text-3xl font-semibold leading-tight tracking-tight">{post.title}</h1>
-        <p className="mt-2 text-sm text-neutral-500">
-          By {fullName(profile)}
-          {post.published_at ? ` · ${post.published_at.slice(0, 10)}` : ""}
-        </p>
-        <div className="prose prose-neutral mt-8 max-w-none">
-          <ReactMarkdown>{post.content_md}</ReactMarkdown>
+
+      {/* Hero — same design language as /blog/2-1-buydown */}
+      <div className="relative h-[280px] w-full sm:h-[360px]">
+        <Image src={blogHeroImg} alt="" fill priority className="object-cover" sizes="100vw" />
+        <div className="absolute inset-0 bg-gradient-to-t from-blue-950/85 via-blue-950/40 to-blue-950/20" />
+        <div className="absolute inset-x-0 bottom-0">
+          <div className="mx-auto max-w-6xl px-6 pb-8">
+            <Link href={base} className="text-sm text-blue-200 hover:text-white">
+              ← {fullName(profile)}
+            </Link>
+            <h1 className="mt-2 max-w-3xl font-serif text-3xl font-bold leading-tight text-white sm:text-4xl">
+              {post.title}
+            </h1>
+            <p className="mt-2 text-sm text-blue-100">
+              By {fullName(profile)}
+              {post.published_at ? ` · ${post.published_at.slice(0, 10)}` : ""}
+            </p>
+          </div>
         </div>
-      </article>
-      <div className="mt-12">
-        <AuthorCard profile={profile} />
+      </div>
+
+      <div className="mx-auto max-w-6xl px-6 py-10 lg:py-14">
+        <div className="grid gap-10 lg:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]">
+          <article>
+            {/* Mobile-only lead form so visitors see it without scrolling */}
+            <div className="mb-8 lg:hidden">
+              <LeadCaptureForm sourcePage={path} />
+            </div>
+            <div className="prose prose-neutral max-w-none prose-headings:font-serif prose-headings:text-blue-950 prose-a:text-blue-800">
+              <ReactMarkdown>{post.content_md}</ReactMarkdown>
+            </div>
+          </article>
+
+          <aside className="lg:pt-2">
+            <div className="space-y-6 lg:sticky lg:top-6">
+              <div className="hidden lg:block">
+                <LeadCaptureForm sourcePage={path} />
+              </div>
+              <AuthorCard profile={profile} />
+            </div>
+          </aside>
+        </div>
       </div>
     </main>
   );

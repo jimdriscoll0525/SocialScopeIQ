@@ -291,7 +291,10 @@ export default function BuydownPage() {
 
             {/* Mobile-only lead form so visitors see it without scrolling to the sidebar */}
             <div className="mt-8 lg:hidden">
-              <LeadCaptureForm sourcePage={PAGE_PATH} />
+              <LeadCaptureForm
+                sourcePage={PAGE_PATH}
+                subtext="Wondering if a 2-1 buydown fits your situation? Enter your info and I'll personally give you a call."
+              />
             </div>
 
             <h2 className={h2Cls}>What is a 2-1 buydown?</h2>
@@ -447,7 +450,7 @@ export default function BuydownPage() {
               </p>
               <p>
                 <strong>Jim Driscoll</strong>, Mortgage Loan Officer, NMLS #21420 ·{" "}
-                <strong>Mortgage Equity Partners</strong>, Company NMLS #[COMPANY NMLS # — CONFIRM]
+                <strong>Mortgage Equity Partners</strong>, Company NMLS #1936
               </p>
               <p className="mt-3">
                 The payment figures on this page are examples for illustration only and are not
@@ -465,7 +468,10 @@ export default function BuydownPage() {
           <aside className="lg:pt-2">
             <div className="space-y-6 lg:sticky lg:top-6">
               <div className="hidden lg:block">
-                <LeadCaptureForm sourcePage={PAGE_PATH} />
+                <LeadCaptureForm
+                  sourcePage={PAGE_PATH}
+                  subtext="Wondering if a 2-1 buydown fits your situation? Enter your info and I'll personally give you a call."
+                />
               </div>
               <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-6">
                 <p className="font-serif text-lg font-bold text-blue-950">About Jim</p>
@@ -488,7 +494,7 @@ export default function BuydownPage() {
         <div className="mx-auto max-w-6xl px-6 py-10 text-sm">
           <p className="font-serif text-base font-bold text-white">Jim Driscoll · Mortgage Equity Partners</p>
           <p className="mt-2 text-blue-200">
-            NMLS #21420 · Company NMLS #[COMPANY NMLS # — CONFIRM] · Equal Housing Opportunity
+            NMLS #21420 · Company NMLS #1936 · Equal Housing Opportunity
           </p>
           <p className="mt-4 max-w-3xl text-xs leading-relaxed text-blue-300">
             This page is for educational purposes and does not constitute an offer of credit or a
