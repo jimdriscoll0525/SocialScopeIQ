@@ -16,7 +16,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return {
     title: post.title,
     description: post.meta_description || undefined,
-    authors: [{ name: `${profile.first_name} ${profile.last_name}` }]
+    authors: [{ name: `${profile.first_name} ${profile.last_name}` }],
+    alternates: { canonical: `/lo/${profile.slug}/${post.slug}` }
   };
 }
 

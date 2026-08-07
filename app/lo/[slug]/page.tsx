@@ -14,7 +14,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const name = `${profile.first_name} ${profile.last_name}`;
   return {
     title: `${name} — Mortgage Loan Officer${profile.company ? ` · ${profile.company}` : ""}`,
-    description: profile.niche || `Mortgage guidance from ${name}.`
+    description: profile.niche || `Mortgage guidance from ${name}.`,
+    alternates: { canonical: `/lo/${profile.slug}` }
   };
 }
 
