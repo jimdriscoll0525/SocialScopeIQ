@@ -435,19 +435,12 @@ export default function BuydownPage() {
               let&rsquo;s run yours.
             </p>
 
-            {/* ============================================================
-                ⚠️ COMPLIANCE BLOCK — placeholders below MUST be reviewed and
-                confirmed by compliance before this page goes live. Items to
-                verify: legal name, company name, company NMLS #, licensing
-                states, Equal Housing logo requirements, disclaimer wording.
-                ============================================================ */}
+            {/* Compliance block — wording approved by compliance 2026-08-07.
+                Run any future edits to this block through compliance again. */}
             <aside
               aria-label="Licensing and disclosures"
-              className="mt-14 rounded-lg border-2 border-dashed border-amber-400 bg-amber-50/60 p-6 text-sm leading-relaxed text-neutral-700"
+              className="mt-14 rounded-lg border border-neutral-200 bg-neutral-50 p-6 text-sm leading-relaxed text-neutral-600"
             >
-              <p className="mb-2 font-semibold uppercase tracking-wide text-amber-700">
-                Draft — pending compliance review
-              </p>
               <p>
                 <strong>Jim Driscoll</strong>, Mortgage Loan Officer, NMLS #21420 ·{" "}
                 <strong>Mortgage Equity Partners</strong>, Company NMLS #1936
