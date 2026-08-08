@@ -36,6 +36,13 @@ export async function middleware(request: NextRequest) {
 
   if (!user) {
     const url = request.nextUrl.clone();
+    // The site root doubles as the public front door: signed-in users get the
+    // lead dashboard, anonymous visitors (and crawlers) get /home rewritten in
+    // place so the content lives at "/" for SEO.
+    if (url.pathname === "/") {
+      url.pathname = "/home";
+      return NextResponse.rewrite(url);
+    }
     url.pathname = "/login";
     url.search = "";
     return NextResponse.redirect(url);
@@ -46,6 +53,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon\\.ico|login|auth(?:/|$)|agents(?:/|$)|lo(?:/|$)|blog/2-1-buydown(?:/|$)|sitemap\\.xml|robots\\.txt|api/bookmarklet|api/scout|api/blog-cron|api/lead-capture(?:/|$)|.*\\.[\\w]+$).*)"
+    "/((?!_next/static|_next/image|favicon\\.ico|login|auth(?:/|$)|agents(?:/|$)|lo(?:/|$)|blog/2-1-buydown(?:/|$)|home(?:/|$)|sitemap\\.xml|robots\\.txt|api/bookmarklet|api/scout|api/blog-cron|api/lead-capture(?:/|$)|.*\\.[\\w]+$).*)"
   ]
 };

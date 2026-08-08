@@ -34,7 +34,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   );
 
   const entries: MetadataRoute.Sitemap = [
-    // Static public landing pages.
+    // Static public pages. "/" serves the public homepage to anonymous
+    // visitors (middleware rewrite to /home).
+    { url: base, changeFrequency: "weekly" },
     { url: `${base}/blog/2-1-buydown`, changeFrequency: "monthly" }
   ];
   for (const p of profileById.values()) {
