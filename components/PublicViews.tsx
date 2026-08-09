@@ -2,7 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { roleBasePath, type PublicProfile } from "@/lib/public-blog";
+import { getPublishedPosts, roleBasePath, type PublicProfile } from "@/lib/public-blog";
 import type { BlogPost } from "@/lib/types";
 import LeadCaptureForm from "@/components/LeadCaptureForm";
 // Default post hero (free license, do not hotlink): Pexels #106399 by
@@ -312,9 +312,12 @@ const markdownComponents = {
   )
 };
 
-export function PostView({ profile, post }: { profile: PublicProfile; post: BlogPost }) {
+export async function PostView({ profile, post }: { profile: PublicProfile; post: BlogPost }) {
   const base = `${roleBasePath(profile.role)}/${profile.slug}`;
   const path = `${base}/${post.slug}`;
+  // Internal links between posts help crawlers find the full set and keep
+  // readers on the site. Newest three besides the one being read.
+  const related = (await getPublishedPosts(profile.id)).filter((p) => p.slug !== post.slug).slice(0, 3);
   const postLd = {
     "@context": "https://schema.org",
     "@type": "BlogPosting",
@@ -362,6 +365,28 @@ export function PostView({ profile, post }: { profile: PublicProfile; post: Blog
                 {post.content_md}
               </ReactMarkdown>
             </div>
+
+            {related.length > 0 ? (
+              <section className="mt-12 border-t border-neutral-200 pt-8">
+                <h2 className="font-serif text-xl font-bold text-blue-950">
+                  More from {fullName(profile)}
+                </h2>
+                <ul className="mt-4 space-y-4">
+                  {related.map((p) => (
+                    <li key={p.id}>
+                      <Link href={`${base}/${p.slug}`} className="group block">
+                        <p className="font-medium text-neutral-900 underline-offset-2 group-hover:underline">
+                          {p.title}
+                        </p>
+                        {p.meta_description ? (
+                          <p className="mt-1 text-sm text-neutral-600">{p.meta_description}</p>
+                        ) : null}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
           </article>
 
           <aside className="lg:pt-2">

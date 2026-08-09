@@ -13,11 +13,19 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!profile) return {};
   const post = await getPublishedPost(profile.id, postSlug);
   if (!post) return {};
+  const path = `/lo/${profile.slug}/${post.slug}`;
   return {
     title: post.title,
     description: post.meta_description || undefined,
     authors: [{ name: `${profile.first_name} ${profile.last_name}` }],
-    alternates: { canonical: `/lo/${profile.slug}/${post.slug}` }
+    alternates: { canonical: path },
+    openGraph: {
+      title: post.title,
+      description: post.meta_description || undefined,
+      type: "article",
+      url: path,
+      images: [{ url: "/assets/blog-hero-default.jpg", width: 1600, height: 1067 }]
+    }
   };
 }
 
