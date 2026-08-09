@@ -3,7 +3,16 @@
 import { getProfile } from "@/lib/supabase/server";
 import { buildDrafterProfile } from "@/lib/drafter";
 import { generateBlogPost } from "@/lib/blogger";
+import { sendBlogReviewEmail } from "@/lib/notify";
+import { roleBasePath } from "@/lib/public-blog";
 import type { BlogPost } from "@/lib/types";
+
+function siteUrl(): string {
+  return (
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000")
+  );
+}
 
 // Cap on unreviewed drafts per user. Generation (manual or cron) stops at the
 // cap so the review queue can't silently pile up API spend. (Not exported:
@@ -117,10 +126,11 @@ export async function setPostStatus(
   id: string,
   status: "draft" | "published"
 ): Promise<BlogMutateResult> {
-  const { supabase, user } = await getProfile();
+  const { supabase, user, profile } = await getProfile();
   if (!user) return { ok: false, error: "Not signed in." };
 
   const patch: Record<string, unknown> = { status };
+  let firstPublish = false;
   if (status === "published") {
     // Keep the original publish date on re-publish after an unpublish+edit.
     const { data } = await supabase
@@ -128,7 +138,10 @@ export async function setPostStatus(
       .select("published_at")
       .eq("id", id)
       .maybeSingle();
-    if (!data?.published_at) patch.published_at = new Date().toISOString();
+    if (!data?.published_at) {
+      patch.published_at = new Date().toISOString();
+      firstPublish = true;
+    }
   }
 
   const { error } = await supabase
@@ -136,7 +149,27 @@ export async function setPostStatus(
     .update(patch)
     .eq("id", id)
     .eq("author_id", user.id);
-  return error ? { ok: false, error: error.message } : { ok: true };
+  if (error) return { ok: false, error: error.message };
+
+  // First time a post goes live, loop in the MEP marketing team so they can
+  // review it for the company site. Never blocks or fails the publish.
+  if (firstPublish && profile) {
+    const { data: post } = await supabase
+      .from("blog_posts")
+      .select("slug, title, meta_description")
+      .eq("id", id)
+      .maybeSingle();
+    if (post) {
+      await sendBlogReviewEmail({
+        title: post.title,
+        metaDescription: post.meta_description,
+        url: `${siteUrl()}${roleBasePath(profile.role)}/${profile.slug}/${post.slug}`,
+        authorName: `${profile.first_name} ${profile.last_name}`.trim()
+      });
+    }
+  }
+
+  return { ok: true };
 }
 
 export async function deletePost(id: string): Promise<BlogMutateResult> {
