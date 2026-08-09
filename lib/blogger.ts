@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { HUMANIZER_RULES } from "./humanizer";
 import { BLOG_MODEL } from "./config";
 import { LO_FACT_CORRECTIONS, type DrafterProfile } from "./drafter";
-import { BLOG_IMAGES } from "./blog-images";
+import { imageChoices } from "./blog-images";
 import { slugify } from "./slug";
 
 // Long-form blog generation (Phase 5). One API call produces topic + title +
@@ -75,7 +75,7 @@ What a good post looks like:
 
 Visuals (the page template renders these; use them):
 - Insert exactly 2 photos from this library — and ONLY this library, never any other image path or external URL — as standard markdown images, each on its own line between sections (never back-to-back, never in the first section; the page already has a hero photo at the top). Keep each image's listed alt text. Available photos:
-${BLOG_IMAGES.map((img) => `  ![${img.alt}](${img.path}) — good for: ${img.use}`).join("\n")}
+${imageChoices().map((img) => `  ![${img.alt}](${img.path}) — good for: ${img.use}`).join("\n")}
 - Markdown tables are supported and styled. When the post compares options, tiers, or steps side by side, prefer a small table (2-4 columns) over a long paragraph.
 - A simple bar chart is available: a fenced code block with the language tag "chart" containing JSON like {"title": "...", "unit": "$", "bars": [{"label": "Year 1", "value": 2684}, {"label": "Year 2", "value": 2998}], "footnote": "Example for illustration only, not a quote."}. Include at most one chart, and only when the post naturally contains 2-6 comparable numbers you are confident in (loan limits, down payment tiers, example payments). Every chart built on example dollar amounts must carry that exact "Example for illustration only" footnote. Never chart interest rates or APRs. If no such numbers fit the topic, no chart — most posts won't have one.
 ${complianceRules}

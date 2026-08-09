@@ -5,10 +5,10 @@ import remarkGfm from "remark-gfm";
 import { getPublishedPosts, roleBasePath, type PublicProfile } from "@/lib/public-blog";
 import type { BlogPost } from "@/lib/types";
 import LeadCaptureForm from "@/components/LeadCaptureForm";
-// Default post hero (free license, do not hotlink): Pexels #106399 by
-// Binyamin Mellish — same photo as the 2-1 buydown landing page hero.
-// https://www.pexels.com/photo/blue-and-gray-concrete-house-with-attic-during-twilight-106399/
-import blogHeroImg from "@/public/assets/blog-hero-default.jpg";
+// Post heroes rotate per-post: heroForSlug picks deterministically from the
+// landscape pool in lib/blog-images.ts, so every post keeps a stable hero but
+// posts no longer all share one photo.
+import { heroForSlug } from "@/lib/blog-images";
 
 // Server-rendered building blocks shared by the /lo/* and /agents/* public
 // pages. The lead form is the only client JS beyond what Next ships anyway.
@@ -318,6 +318,7 @@ export async function PostView({ profile, post }: { profile: PublicProfile; post
   // Internal links between posts help crawlers find the full set and keep
   // readers on the site. Newest three besides the one being read.
   const related = (await getPublishedPosts(profile.id)).filter((p) => p.slug !== post.slug).slice(0, 3);
+  const heroSrc = heroForSlug(post.slug);
   const postLd = {
     "@context": "https://schema.org",
     "@type": "BlogPosting",
@@ -325,7 +326,7 @@ export async function PostView({ profile, post }: { profile: PublicProfile; post
     ...(post.meta_description ? { description: post.meta_description } : {}),
     ...(post.published_at ? { datePublished: post.published_at } : {}),
     dateModified: post.updated_at,
-    image: `${siteUrl()}/assets/blog-hero-default.jpg`,
+    image: `${siteUrl()}${heroSrc}`,
     mainEntityOfPage: `${siteUrl()}${path}`,
     author: personJsonLd(profile)
   };
@@ -335,7 +336,7 @@ export async function PostView({ profile, post }: { profile: PublicProfile; post
 
       {/* Hero — same design language as /blog/2-1-buydown */}
       <div className="relative h-[280px] w-full sm:h-[360px]">
-        <Image src={blogHeroImg} alt="" fill priority className="object-cover" sizes="100vw" />
+        <Image src={heroSrc} alt="" fill priority className="object-cover" sizes="100vw" />
         <div className="absolute inset-0 bg-gradient-to-t from-blue-950/85 via-blue-950/40 to-blue-950/20" />
         <div className="absolute inset-x-0 bottom-0">
           <div className="mx-auto max-w-6xl px-6 pb-8">
