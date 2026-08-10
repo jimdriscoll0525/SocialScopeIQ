@@ -110,6 +110,11 @@ export interface BlogPost {
   is_custom: boolean;
   status: BlogPostStatus;
   published_at: string | null;
+  // Video posts: video_id set (11-char YouTube ID) marks a post as a video
+  // post; text posts leave all three null.
+  video_provider: "youtube" | null;
+  video_id: string | null;
+  transcript: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getPublicProfile, getPublishedPost } from "@/lib/public-blog";
 import { heroForSlug } from "@/lib/blog-images";
+import { resolveYoutubeThumbnail } from "@/lib/youtube-server";
 import { PostView } from "@/components/PublicViews";
 
 export const revalidate = 300;
@@ -25,7 +26,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       description: post.meta_description || undefined,
       type: "article",
       url: path,
-      images: [{ url: heroForSlug(post.slug) }]
+      // Video posts share the YouTube thumbnail; React cache() dedups the
+      // HEAD check with PostView's call in the same request.
+      images: [{ url: post.video_id ? await resolveYoutubeThumbnail(post.video_id) : heroForSlug(post.slug) }]
     }
   };
 }

@@ -2,7 +2,8 @@
 
 import { getProfile } from "@/lib/supabase/server";
 import { buildDrafterProfile } from "@/lib/drafter";
-import { generateBlogPost } from "@/lib/blogger";
+import { generateBlogPost, generateVideoBlogPost } from "@/lib/blogger";
+import { parseYouTubeId } from "@/lib/youtube";
 import { sendBlogReviewEmail } from "@/lib/notify";
 import { roleBasePath } from "@/lib/public-blog";
 import type { BlogPost } from "@/lib/types";
@@ -100,9 +101,96 @@ export async function generatePost(topic?: string): Promise<BlogActionResult> {
   }
 }
 
+// Generate a video companion post from a YouTube URL + the video's script.
+// Only the 11-char video ID is ever stored — never a URL or embed markup.
+// Video posts don't count against custom_blog_limit (they're anchored to the
+// user's own recorded content); the pending-drafts cap still bounds API spend.
+export async function generateVideoPost(input: {
+  videoUrl: string;
+  script: string;
+  description?: string;
+}): Promise<BlogActionResult> {
+  const { supabase, user, profile } = await getProfile();
+  if (!user || !profile) return { ok: false, error: "Not signed in." };
+
+  const videoId = parseYouTubeId(input.videoUrl);
+  if (!videoId) {
+    return {
+      ok: false,
+      error:
+        "That doesn't look like a YouTube link. Paste a watch, youtu.be, Shorts, or embed URL — or just the 11-character video ID."
+    };
+  }
+
+  const script = input.script.trim();
+  if (script.length < 200) {
+    return { ok: false, error: "Script looks too short to build a post from." };
+  }
+  if (script.length > 30000) {
+    return { ok: false, error: "Script is too long — trim it to roughly 5,000 words." };
+  }
+
+  const { count: pendingCount } = await supabase
+    .from("blog_posts")
+    .select("id", { count: "exact", head: true })
+    .eq("author_id", user.id)
+    .eq("status", "draft");
+  if ((pendingCount ?? 0) >= MAX_PENDING_DRAFTS) {
+    return {
+      ok: false,
+      error: `You have ${pendingCount} unreviewed drafts. Publish or delete some before generating more.`
+    };
+  }
+
+  const { data: existing } = await supabase
+    .from("blog_posts")
+    .select("title, slug")
+    .eq("author_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  const existingTitles = (existing || []).map((p) => p.title);
+  const existingSlugs = new Set((existing || []).map((p) => p.slug));
+
+  try {
+    const gen = await generateVideoBlogPost({
+      profile: buildDrafterProfile(profile),
+      script,
+      // Generation context only, never stored or published. Cap matches the
+      // settings-form pattern of silently truncating long free text.
+      description: input.description?.trim().slice(0, 2000) || null,
+      existingTitles
+    });
+
+    // Per-author slug collision: base, base-2, base-3, ...
+    let slug = gen.slug;
+    for (let i = 2; existingSlugs.has(slug) && i < 50; i++) slug = `${gen.slug}-${i}`;
+
+    const { data, error } = await supabase
+      .from("blog_posts")
+      .insert({
+        author_id: user.id,
+        slug,
+        title: gen.title,
+        meta_description: gen.meta_description || null,
+        topic: gen.topic,
+        content_md: gen.content_md,
+        is_custom: false,
+        video_provider: "youtube",
+        video_id: videoId,
+        transcript: gen.transcript
+      })
+      .select("*")
+      .single();
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, post: data as BlogPost };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Generation failed." };
+  }
+}
+
 export async function updatePost(
   id: string,
-  fields: { title: string; meta_description: string; content_md: string }
+  fields: { title: string; meta_description: string; content_md: string; transcript?: string }
 ): Promise<BlogMutateResult> {
   const { supabase, user } = await getProfile();
   if (!user) return { ok: false, error: "Not signed in." };
@@ -110,12 +198,15 @@ export async function updatePost(
     return { ok: false, error: "Title and body can't be empty." };
   }
   // Slug is intentionally left alone on edit: published URLs stay stable.
+  // The video itself (video_id) is also immutable — delete and recreate to
+  // point a post at a different video.
   const { error } = await supabase
     .from("blog_posts")
     .update({
       title: fields.title.trim(),
       meta_description: fields.meta_description.trim() || null,
-      content_md: fields.content_md
+      content_md: fields.content_md,
+      ...(fields.transcript !== undefined ? { transcript: fields.transcript.trim() || null } : {})
     })
     .eq("id", id)
     .eq("author_id", user.id);

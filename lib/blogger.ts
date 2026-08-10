@@ -26,6 +26,17 @@ export interface BlogGenResult {
   content_md: string;
 }
 
+export interface VideoBlogGenRequest {
+  profile: DrafterProfile;
+  script: string; // raw video script supplied by the author
+  description?: string | null; // optional context about the video; never published
+  existingTitles: string[];
+}
+
+export interface VideoBlogGenResult extends BlogGenResult {
+  transcript: string; // cleaned-up script for the "Video Transcript" section
+}
+
 function territory(p: DrafterProfile): string {
   if (p.townsServed.length > 0 && p.statesServed.length > 0) {
     return `${p.townsServed.join(", ")} (${p.statesServed.join(", ")})`;
@@ -35,7 +46,7 @@ function territory(p: DrafterProfile): string {
   return "their local market";
 }
 
-function buildBlogSystemPrompt(p: DrafterProfile): string {
+function buildBlogSystemPrompt(p: DrafterProfile, mode: "article" | "video" = "article"): string {
   const name = `${p.firstName} ${p.lastName}`.trim();
   const isRealtor = p.role === "realtor";
 
@@ -57,12 +68,48 @@ Compliance, never break:
 
 ${LO_FACT_CORRECTIONS}`;
 
+  // Video companion posts: the page embeds the author's YouTube video at the
+  // top, so the article must add to it rather than restate it, and the model
+  // also produces a reader-friendly transcript from the raw script.
+  const videoJobs =
+    mode === "video"
+      ? `
+
+This post accompanies a video recorded by ${name}, embedded at the top of the page. You are given the raw video script. Two jobs:
+1. ARTICLE — write a post that COMPLEMENTS the video, never restates it. Go deeper on the numbers, add context the video skipped, cover the follow-up questions a viewer would have, and give concrete next steps. A reader who watched the video must learn new things here; a reader who skips the video must still get a complete standalone article. You may reference the video ("In the video above...") at most twice. For video companions, 700-1100 words is the target instead of the usual range.
+2. CLEANED TRANSCRIPT — rewrite the script as a readable transcript: remove stage directions (e.g. [cut to b-roll]), camera and editor notes, filler words (um, uh, you know), sponsor reads, and calls to like or subscribe. Keep the substance and ${p.firstName}'s voice. Plain paragraphs only — no headings, no markdown formatting, and never invent content that isn't in the script.`
+      : "";
+
+  const outputFormat =
+    mode === "video"
+      ? `
+Output format, exactly this structure (labeled header lines, then a line containing only ---, then the markdown article, then a line containing only ---TRANSCRIPT---, then the cleaned transcript; no other commentary):
+TOPIC: <the topic in a few words>
+TITLE: <post title, 50-65 characters, compelling but plain, no clickbait>
+META: <meta description, 140-160 characters, plain summary that earns the click>
+---
+<the full markdown article body>
+---TRANSCRIPT---
+<the cleaned transcript, plain paragraphs>`
+      : `
+Output format, exactly this structure (labeled header lines, then a line containing only ---, then the markdown body; no other commentary):
+TOPIC: <the topic in a few words>
+TITLE: <post title, 50-65 characters, compelling but plain, no clickbait>
+META: <meta description, 140-160 characters, plain summary that earns the click>
+---
+<the full markdown body>`;
+
+  const photoRule =
+    mode === "video"
+      ? "Insert at most 1 photo (the embedded video is the visual anchor; most video posts need none)"
+      : "Insert exactly 2 photos";
+
   return `
 You are ghostwriting a blog post published under ${name}'s byline on their public professional page.
 
 ${persona}
 About them, in their own words (match this voice; use only these facts for credibility, never invent more): ${p.voiceSample?.trim() || "An experienced professional."}
-Specialties: ${p.niche?.trim() || (isRealtor ? "residential real estate" : "residential mortgage lending")}
+Specialties: ${p.niche?.trim() || (isRealtor ? "residential real estate" : "residential mortgage lending")}${videoJobs}
 
 What a good post looks like:
 - 900-1400 words of genuinely useful, specific guidance a reader could act on. Written for consumers (buyers, owners, investors), not for industry peers.
@@ -74,20 +121,14 @@ What a good post looks like:
 - End with a short practical wrap-up section, not a sales close. Do not sign the post or end with ${p.firstName}'s name; the byline and author card are rendered separately.
 
 Visuals (the page template renders these; use them):
-- Insert exactly 2 photos from this library — and ONLY this library, never any other image path or external URL — as standard markdown images, each on its own line between sections (never back-to-back, never in the first section; the page already has a hero photo at the top). Keep each image's listed alt text. Available photos:
+- ${photoRule} from this library — and ONLY this library, never any other image path or external URL — as standard markdown images, each on its own line between sections (never back-to-back, never in the first section; the page already has a hero photo at the top). Keep each image's listed alt text. Available photos:
 ${imageChoices().map((img) => `  ![${img.alt}](${img.path}) — good for: ${img.use}`).join("\n")}
 - Markdown tables are supported and styled. When the post compares options, tiers, or steps side by side, prefer a small table (2-4 columns) over a long paragraph.
 - A simple bar chart is available: a fenced code block with the language tag "chart" containing JSON like {"title": "...", "unit": "$", "bars": [{"label": "Year 1", "value": 2684}, {"label": "Year 2", "value": 2998}], "footnote": "Example for illustration only, not a quote."}. Include at most one chart, and only when the post naturally contains 2-6 comparable numbers you are confident in (loan limits, down payment tiers, example payments). Every chart built on example dollar amounts must carry that exact "Example for illustration only" footnote. Never chart interest rates or APRs. If no such numbers fit the topic, no chart — most posts won't have one.
 ${complianceRules}
 
 ${HUMANIZER_RULES}
-
-Output format, exactly this structure (labeled header lines, then a line containing only ---, then the markdown body; no other commentary):
-TOPIC: <the topic in a few words>
-TITLE: <post title, 50-65 characters, compelling but plain, no clickbait>
-META: <meta description, 140-160 characters, plain summary that earns the click>
----
-<the full markdown body>
+${outputFormat}
 `.trim();
 }
 
@@ -129,7 +170,11 @@ function parseBlogOutput(text: string, fallbackTopic: string): Omit<BlogGenResul
   };
 }
 
-export async function generateBlogPost(req: BlogGenRequest): Promise<BlogGenResult> {
+async function callBlogModel(
+  system: string,
+  user: string,
+  maxTokens: number
+): Promise<{ text: string; truncated: boolean }> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set");
   const client = new Anthropic({ apiKey });
@@ -137,9 +182,9 @@ export async function generateBlogPost(req: BlogGenRequest): Promise<BlogGenResu
   // BLOG_MODEL defaults to Opus 5, which rejects `temperature` — don't send one.
   const msg = await client.messages.create({
     model: BLOG_MODEL,
-    max_tokens: 8000,
-    system: buildBlogSystemPrompt(req.profile),
-    messages: [{ role: "user", content: buildBlogUserPrompt(req) }]
+    max_tokens: maxTokens,
+    system,
+    messages: [{ role: "user", content: user }]
   });
 
   const text = msg.content
@@ -148,8 +193,60 @@ export async function generateBlogPost(req: BlogGenRequest): Promise<BlogGenResu
     .join("")
     .trim();
 
+  return { text, truncated: msg.stop_reason === "max_tokens" };
+}
+
+export async function generateBlogPost(req: BlogGenRequest): Promise<BlogGenResult> {
+  const { text } = await callBlogModel(
+    buildBlogSystemPrompt(req.profile),
+    buildBlogUserPrompt(req),
+    8000
+  );
+
   const parsed = parseBlogOutput(text, req.topic?.trim() || "mortgage guidance");
   if (!parsed.content_md) throw new Error("Blog generation returned an empty body");
 
   return { ...parsed, slug: slugify(parsed.title) };
+}
+
+function buildVideoBlogUserPrompt(req: VideoBlogGenRequest): string {
+  const existing =
+    req.existingTitles.length > 0
+      ? `\n\nAlready published or drafted (pick a clearly different title; do not rehash these):\n${req.existingTitles
+          .slice(0, 30)
+          .map((t) => `- ${t}`)
+          .join("\n")}`
+      : "";
+  const description = req.description?.trim()
+    ? `\n\nVideo description (context only — none of this is spoken in the video: use it to inform the article, and never include any of it in the transcript):\n${req.description.trim()}`
+    : "";
+  return `Here is the raw video script:\n\n${req.script}${description}\n\nWrite the companion article and the cleaned transcript.${existing}`;
+}
+
+export async function generateVideoBlogPost(req: VideoBlogGenRequest): Promise<VideoBlogGenResult> {
+  // 16k output tokens: the article plus a cleaned transcript of a long video
+  // won't fit in the 8k used for text posts.
+  const { text, truncated } = await callBlogModel(
+    buildBlogSystemPrompt(req.profile, "video"),
+    buildVideoBlogUserPrompt(req),
+    16000
+  );
+  if (truncated) {
+    throw new Error("The script is too long to process in one pass — trim it and try again.");
+  }
+
+  // Split the transcript off before reusing parseBlogOutput so its "\n---"
+  // divider logic only ever sees the header + article. Tolerant of dash-count
+  // and spacing drift around the delimiter.
+  const delim = text.match(/\n-{2,}\s*TRANSCRIPT\s*-{2,}\s*\n/i);
+  if (!delim || delim.index === undefined) {
+    throw new Error("Generation didn't return a transcript — try again.");
+  }
+  const transcript = text.slice(delim.index + delim[0].length).trim();
+  const parsed = parseBlogOutput(text.slice(0, delim.index), "video companion post");
+  if (!parsed.content_md || !transcript) {
+    throw new Error("Generation returned an incomplete post — try again.");
+  }
+
+  return { ...parsed, slug: slugify(parsed.title), transcript };
 }

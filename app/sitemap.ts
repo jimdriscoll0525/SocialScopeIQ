@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { supabaseAnon } from "@/lib/supabase";
 import { roleBasePath } from "@/lib/public-blog";
+import { youtubeThumbnails } from "@/lib/youtube";
 import type { Role } from "@/lib/types";
 
 export const revalidate = 3600;
@@ -22,7 +23,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     supabase.from("public_profiles").select("id, slug, role"),
     supabase
       .from("blog_posts")
-      .select("slug, author_id, updated_at")
+      .select("slug, author_id, updated_at, title, meta_description, video_id")
       .eq("status", "published")
   ]);
 
@@ -42,13 +43,33 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   for (const p of profileById.values()) {
     entries.push({ url: `${base}${roleBasePath(p.role)}/${p.slug}`, changeFrequency: "weekly" });
   }
-  for (const post of (posts || []) as Array<{ slug: string; author_id: string; updated_at: string }>) {
+  for (const post of (posts || []) as Array<{
+    slug: string;
+    author_id: string;
+    updated_at: string;
+    title: string;
+    meta_description: string | null;
+    video_id: string | null;
+  }>) {
     const author = profileById.get(post.author_id);
     if (!author) continue;
     entries.push({
       url: `${base}${roleBasePath(author.role)}/${author.slug}/${post.slug}`,
       lastModified: post.updated_at,
-      changeFrequency: "monthly"
+      changeFrequency: "monthly",
+      // Video sitemap extension for video posts. hqdefault always exists, so
+      // no maxres HEAD check here.
+      ...(post.video_id
+        ? {
+            videos: [
+              {
+                title: post.title,
+                thumbnail_loc: youtubeThumbnails(post.video_id).hq,
+                description: post.meta_description || post.title
+              }
+            ]
+          }
+        : {})
     });
   }
   return entries;

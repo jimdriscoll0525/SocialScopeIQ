@@ -9,6 +9,13 @@ import LeadCaptureForm from "@/components/LeadCaptureForm";
 // landscape pool in lib/blog-images.ts, so every post keeps a stable hero but
 // posts no longer all share one photo.
 import { heroForSlug } from "@/lib/blog-images";
+import { youtubeEmbedUrl, youtubeThumbnails } from "@/lib/youtube";
+import { resolveYoutubeThumbnail } from "@/lib/youtube-server";
+
+// Belt-and-suspenders on top of the DB check constraint: video_id feeds an
+// iframe src and JSON-LD, so only ever render one that matches the YouTube ID
+// alphabet exactly.
+const YT_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 
 // Server-rendered building blocks shared by the /lo/* and /agents/* public
 // pages. The lead form is the only client JS beyond what Next ships anyway.
@@ -156,19 +163,42 @@ export function ProfileView({ profile, posts }: { profile: PublicProfile; posts:
         <p className="text-neutral-500">No articles published yet — check back soon.</p>
       ) : (
         <ul className="space-y-6">
-          {posts.map((p) => (
-            <li key={p.id}>
-              <Link href={`${base}/${p.slug}`} className="group block">
-                <p className="font-medium underline-offset-2 group-hover:underline">{p.title}</p>
-                {p.meta_description && (
-                  <p className="mt-1 text-sm text-neutral-600">{p.meta_description}</p>
-                )}
-                {p.published_at && (
-                  <p className="mt-1 text-xs text-neutral-400">{p.published_at.slice(0, 10)}</p>
-                )}
-              </Link>
-            </li>
-          ))}
+          {posts.map((p) => {
+            const isVideo = Boolean(p.video_id && YT_ID_RE.test(p.video_id));
+            return (
+              <li key={p.id}>
+                <Link href={`${base}/${p.slug}`} className="group flex gap-4">
+                  {isVideo && (
+                    /* hqdefault always exists (unlike maxres), so no fallback
+                       check is needed for feed cards. Plain <img>: external
+                       host, not worth a remotePatterns entry. */
+                    <img
+                      src={youtubeThumbnails(p.video_id!).hq}
+                      alt=""
+                      loading="lazy"
+                      className="hidden w-40 shrink-0 self-start rounded-md object-cover aspect-video sm:block"
+                    />
+                  )}
+                  <span className="block min-w-0">
+                    <span className="block font-medium underline-offset-2 group-hover:underline">
+                      {p.title}
+                      {isVideo && (
+                        <span className="ml-2 inline-block rounded bg-neutral-100 px-1.5 py-0.5 align-middle text-xs font-normal text-neutral-600">
+                          ▶ Video
+                        </span>
+                      )}
+                    </span>
+                    {p.meta_description && (
+                      <span className="mt-1 block text-sm text-neutral-600">{p.meta_description}</span>
+                    )}
+                    {p.published_at && (
+                      <span className="mt-1 block text-xs text-neutral-400">{p.published_at.slice(0, 10)}</span>
+                    )}
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       )}
     </main>
@@ -318,7 +348,11 @@ export async function PostView({ profile, post }: { profile: PublicProfile; post
   // Internal links between posts help crawlers find the full set and keep
   // readers on the site. Newest three besides the one being read.
   const related = (await getPublishedPosts(profile.id)).filter((p) => p.slug !== post.slug).slice(0, 3);
+  const isVideo = Boolean(post.video_id && YT_ID_RE.test(post.video_id));
   const heroSrc = heroForSlug(post.slug);
+  // Video posts use the YouTube thumbnail everywhere an image represents the
+  // post (JSON-LD, og:image via the page wrappers) instead of the stock hero.
+  const thumb = isVideo ? await resolveYoutubeThumbnail(post.video_id!) : null;
   const postLd = {
     "@context": "https://schema.org",
     "@type": "BlogPosting",
@@ -326,20 +360,33 @@ export async function PostView({ profile, post }: { profile: PublicProfile; post
     ...(post.meta_description ? { description: post.meta_description } : {}),
     ...(post.published_at ? { datePublished: post.published_at } : {}),
     dateModified: post.updated_at,
-    image: `${siteUrl()}${heroSrc}`,
+    image: thumb ?? `${siteUrl()}${heroSrc}`,
     mainEntityOfPage: `${siteUrl()}${path}`,
-    author: personJsonLd(profile)
+    author: personJsonLd(profile),
+    // Nested VideoObject (rather than a second top-level entity) so the page
+    // stays one BlogPosting that *contains* a video, per Google's guidance.
+    ...(isVideo
+      ? {
+          video: {
+            "@type": "VideoObject",
+            name: post.title,
+            description: post.meta_description || post.title,
+            uploadDate: post.published_at || post.created_at,
+            embedUrl: youtubeEmbedUrl(post.video_id!),
+            thumbnailUrl: thumb
+          }
+        }
+      : {})
   };
   return (
     <main className="bg-white text-neutral-800">
       <JsonLd data={postLd} />
 
-      {/* Hero — same design language as /blog/2-1-buydown */}
-      <div className="relative h-[280px] w-full sm:h-[360px]">
-        <Image src={heroSrc} alt="" fill priority className="object-cover" sizes="100vw" />
-        <div className="absolute inset-0 bg-gradient-to-t from-blue-950/85 via-blue-950/40 to-blue-950/20" />
-        <div className="absolute inset-x-0 bottom-0">
-          <div className="mx-auto max-w-6xl px-6 pb-8">
+      {isVideo ? (
+        /* Video posts: solid header band — the embedded player below is the
+           visual anchor, so no photo hero. */
+        <div className="w-full bg-blue-950">
+          <div className="mx-auto max-w-6xl px-6 py-10">
             <Link href={base} className="text-sm text-blue-200 hover:text-white">
               ← {fullName(profile)}
             </Link>
@@ -352,11 +399,42 @@ export async function PostView({ profile, post }: { profile: PublicProfile; post
             </p>
           </div>
         </div>
-      </div>
+      ) : (
+        /* Hero — same design language as /blog/2-1-buydown */
+        <div className="relative h-[280px] w-full sm:h-[360px]">
+          <Image src={heroSrc} alt="" fill priority className="object-cover" sizes="100vw" />
+          <div className="absolute inset-0 bg-gradient-to-t from-blue-950/85 via-blue-950/40 to-blue-950/20" />
+          <div className="absolute inset-x-0 bottom-0">
+            <div className="mx-auto max-w-6xl px-6 pb-8">
+              <Link href={base} className="text-sm text-blue-200 hover:text-white">
+                ← {fullName(profile)}
+              </Link>
+              <h1 className="mt-2 max-w-3xl font-serif text-3xl font-bold leading-tight text-white sm:text-4xl">
+                {post.title}
+              </h1>
+              <p className="mt-2 text-sm text-blue-100">
+                By {fullName(profile)}
+                {post.published_at ? ` · ${post.published_at.slice(0, 10)}` : ""}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mx-auto max-w-6xl px-6 py-10 lg:py-14">
         <div className="grid gap-10 lg:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]">
           <article>
+            {isVideo && (
+              <iframe
+                src={youtubeEmbedUrl(post.video_id!)}
+                title={post.title}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+                loading="lazy"
+                style={{ width: "100%", aspectRatio: "16 / 9", border: 0 }}
+                className="mb-8 rounded-lg"
+              />
+            )}
             {/* Mobile-only lead form so visitors see it without scrolling */}
             <div className="mb-8 lg:hidden">
               <LeadCaptureForm sourcePage={path} />
@@ -366,6 +444,19 @@ export async function PostView({ profile, post }: { profile: PublicProfile; post
                 {post.content_md}
               </ReactMarkdown>
             </div>
+
+            {isVideo && post.transcript ? (
+              <section className="mt-12 border-t border-neutral-200 pt-8">
+                <h2 className="font-serif text-xl font-bold text-blue-950">Video Transcript</h2>
+                {/* Plain escaped paragraphs on purpose — the transcript is
+                    spoken text, never markdown or HTML. */}
+                <div className="mt-4 space-y-4 text-neutral-700">
+                  {post.transcript.split(/\n{2,}/).map((para, i) => (
+                    <p key={i}>{para}</p>
+                  ))}
+                </div>
+              </section>
+            ) : null}
 
             {related.length > 0 ? (
               <section className="mt-12 border-t border-neutral-200 pt-8">
