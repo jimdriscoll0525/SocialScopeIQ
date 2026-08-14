@@ -7,6 +7,11 @@ import type { Lead, ResponseStatus, FollowupStatus } from "@/lib/types";
 
 // DELETED = the post was removed before a response went out.
 const STATUS_OPTIONS: ResponseStatus[] = ["DRAFT", "POSTED", "REPLIED", "ENGAGED", "IGNORED", "DELETED"];
+// Statuses that mean a reply actually went out (posted_at gets stamped).
+const POSTED_STATUSES = new Set<ResponseStatus>(["POSTED", "REPLIED", "ENGAGED"]);
+// Soft pacing throttle: warn (never block) past this many replies to the same
+// platform in 24h — burst posting is a moderation flag on Reddit and BP.
+const PACING_LIMIT = 4;
 const FOLLOWUP_OPTIONS: FollowupStatus[] = ["NOT STARTED", "IN PROGRESS", "DONE"];
 const STATE_OPTIONS = ["ALL", "LICENSED ONLY", "MA", "NH", "RI", "NJ", "ME", "CT", "FL", "UNKNOWN", "OUT_OF_STATE"];
 const LICENSED_STATES = new Set(["MA", "NH", "RI", "NJ", "ME", "CT", "FL"]);
@@ -93,6 +98,38 @@ export default function LeadsTable({
     } catch {
       flash("Copy failed — select & copy manually.");
     }
+  }
+
+  // Called when a lead's status moves into a posted state. Counts other leads
+  // on the same platform posted in the past 24h and warns past the limit —
+  // a soft throttle only, the status change still goes through.
+  function warnIfBurstPosting(lead: Lead) {
+    if (!lead.community) return;
+    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const recent = leads.filter(
+      (l) =>
+        l.id !== lead.id &&
+        l.community === lead.community &&
+        l.posted_at &&
+        Date.parse(l.posted_at) >= dayAgo
+    ).length;
+    if (recent > PACING_LIMIT) {
+      flash(
+        `Pacing warning: ${recent} replies already posted to ${lead.community} in the past 24h. ` +
+          "Burst posting is a moderation flag — consider spacing this one out."
+      );
+    }
+  }
+
+  function changeStatus(lead: Lead, next: ResponseStatus) {
+    const fields: Partial<Lead> = { response_status: next };
+    if (POSTED_STATUSES.has(next) && !POSTED_STATUSES.has(lead.response_status)) {
+      warnIfBurstPosting(lead);
+      // Optimistic local stamp so same-session pacing counts stay accurate;
+      // the API sets the authoritative value and ignores this field.
+      if (!lead.posted_at) fields.posted_at = new Date().toISOString();
+    }
+    patch(lead.id, fields);
   }
 
   async function patch(id: string, fields: Partial<Lead>) {
@@ -217,7 +254,7 @@ export default function LeadsTable({
                     <td className="px-3 py-2 align-top">
                       <select
                         value={l.response_status}
-                        onChange={(e) => patch(l.id, { response_status: e.target.value as ResponseStatus })}
+                        onChange={(e) => changeStatus(l, e.target.value as ResponseStatus)}
                         className="rounded border border-neutral-300 bg-white px-2 py-1 text-xs"
                       >
                         {STATUS_OPTIONS.map((s) => <option key={s}>{s}</option>)}

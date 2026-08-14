@@ -114,8 +114,21 @@ export const LO_FACT_CORRECTIONS = `
 Fact corrections (your training data is stale on these; the values below are current and override what you remember — loan officers have been called out for getting these wrong in posted replies):
 - FHA Limited 203(k): the renovation cost cap is $75,000. HUD raised it from $35,000 effective November 2024. NEVER say the Limited 203(k) caps at $35,000.`.trimEnd();
 
-function buildLoBaseProfile(p: DrafterProfile): string {
+// Legacy (non-discussion) platforms keep the original comprehensive-answer
+// approach. Reddit/BiggerPockets replace it with the one-point discussion
+// style (discussionStyleSection below), so those drafts must NOT also carry
+// the case studies / capabilities sections or the 120-350 word target.
+const LEGACY_LO_APPROACH = `
+
+Response approach (all tiers; ~120-350 words, lighter touch ~80-150 words for TIER 3):
+1. Answer the question first. Lead with real, expert value: insight, a framework, specific numbers, programs, or examples where they genuinely help. Use a case study only if it fits.
+2. Acknowledge tradeoffs honestly instead of overselling any one option.
+3. Weave credibility in once, naturally (drawing on the "About them" line above), never forced, never a pitch.`;
+
+function buildLoBaseProfile(p: DrafterProfile, discussion: boolean): string {
   const name = fullName(p);
+  const extras = discussion ? "" : `${caseStudiesSection(p)}${capabilitiesSection(p)}`;
+  const approach = discussion ? "" : LEGACY_LO_APPROACH;
   return `
 You are drafting a reply on ${name}'s behalf for an online community thread.
 
@@ -124,12 +137,7 @@ ${name}'s identity:
 - About them, in their own words (match this voice; use only these facts for credibility, never invent more): ${p.voiceSample?.trim() || "An experienced mortgage loan officer."}
 - Based in: ${territory(p)} (use only as context when a poster's location is relevant, never as a plug)
 - Specialties: ${p.niche?.trim() || "residential mortgage lending"}
-- Tone: Warm, professional, direct, data-driven, educational, approachable. Write like a knowledgeable person genuinely helping a stranger, not like a salesperson.${caseStudiesSection(p)}${capabilitiesSection(p)}
-
-Response approach (all tiers; ~120-350 words, lighter touch ~80-150 words for TIER 3):
-1. Answer the question first. Lead with real, expert value: insight, a framework, specific numbers, programs, or examples where they genuinely help. Use a case study only if it fits.
-2. Acknowledge tradeoffs honestly instead of overselling any one option.
-3. Weave credibility in once, naturally (drawing on the "About them" line above), never forced, never a pitch.
+- Tone: Warm, professional, direct, data-driven, educational, approachable. Write like a knowledgeable person genuinely helping a stranger, not like a salesperson.${extras}${approach}
 
 Hard rules, never break:
 - Never lead with a pitch.
@@ -144,8 +152,17 @@ ${LO_FACT_CORRECTIONS}
 `.trim();
 }
 
-function buildRealtorBaseProfile(p: DrafterProfile): string {
+const LEGACY_REALTOR_APPROACH = `
+
+Response approach (~80-250 words):
+1. Answer the actual question first with specific local insight: towns, commutes, process steps, what to expect — real substance, not generalities.
+2. Acknowledge tradeoffs honestly (every town and every strategy has them).
+3. At most one natural credibility mention, drawn from the "About them" line. Never forced.`;
+
+function buildRealtorBaseProfile(p: DrafterProfile, discussion: boolean): string {
   const name = fullName(p);
+  const extras = discussion ? "" : `${caseStudiesSection(p)}${capabilitiesSection(p)}`;
+  const approach = discussion ? "" : LEGACY_REALTOR_APPROACH;
   return `
 You are drafting a reply on ${name}'s behalf for an online community thread.
 
@@ -154,12 +171,7 @@ ${name}'s identity:
 - A real estate agent${p.brokerage ? ` with ${p.brokerage}` : ""} serving ${territory(p)}
 - About them, in their own words (match this voice; use only these facts for credibility, never invent more): ${p.voiceSample?.trim() || "A knowledgeable local real estate agent."}
 - Specialties: ${p.niche?.trim() || "residential real estate"}
-- Tone: Warm, local, plainspoken, genuinely helpful — a neighbor who knows the market, not a salesperson.${caseStudiesSection(p)}${capabilitiesSection(p)}
-
-Response approach (~80-250 words):
-1. Answer the actual question first with specific local insight: towns, commutes, process steps, what to expect — real substance, not generalities.
-2. Acknowledge tradeoffs honestly (every town and every strategy has them).
-3. At most one natural credibility mention, drawn from the "About them" line. Never forced.
+- Tone: Warm, local, plainspoken, genuinely helpful — a neighbor who knows the market, not a salesperson.${extras}${approach}
 
 Hard rules, never break:
 - FAIR HOUSING: never characterize neighborhoods or towns by the demographics of the people who live there (race, ethnicity, religion, national origin, family status, disability), and never steer. Describe property, prices in general terms, process, commute, amenities, and lifestyle facts. For schools, point to objective sources (state report cards, test-score sites) rather than labeling schools or towns "good" or "bad".
@@ -278,7 +290,7 @@ Hard rules:
 - No credentials: no job title, no license or NMLS number, no "licensed in..." lists.
 - No offers of service: no "I can help", no "happy to run numbers", no "feel free to reach out", and no DM/message invitation of any kind.
 - No signature block. Do not even sign off with "${p.firstName}". End the reply on the substance of the answer, never on a call to action.
-- If a genuinely helpful answer requires recommending that the person talk to a professional, say "talk to a local loan officer or a HUD housing counselor" (or the equivalent generic professional) — NEVER reference ${p.firstName}, and never imply the reader could or should work with the author of the reply.`.trim();
+- Never point the reader at a professional or service as the takeaway: no "talk to a loan officer", "consult a lender", "worth running by an attorney", or any mention of loan officers, lenders, brokers, or financing services as a suggestion. End on the substance of the answer and never imply the reader could or should work with the author of the reply.`.trim();
 }
 
 // Extra rules for STRICT_NO_PROMO subreddits (and any unknown subreddit —
@@ -292,17 +304,122 @@ STRICT NO-PROMOTION COMMUNITY — these rules override everything above about cr
 - The reply must read like it was written by a well-informed private individual with no business interest in the topic.`.trim();
 }
 
-// Build the system prompt: role-specific base profile + the platform contact
-// rules + strict-sub overrides where applicable + the humanizer style rules.
+// ─── Discussion style (Reddit + BiggerPockets) ───────────────────────────────
+// These two platforms get the one-point, react-to-the-thread drafting style
+// instead of the legacy comprehensive answer. Detection matches the
+// sanitizer's platform detection exactly (community OR source, since the
+// scouts populate them differently).
+
+export type DiscussionPlatform = "reddit" | "biggerpockets";
+
+export function detectDiscussionPlatform(
+  community: string,
+  source: string
+): DiscussionPlatform | null {
+  const hay = `${community} ${source}`.toLowerCase();
+  if (/reddit|(^|\s)\/?r\//.test(hay)) return "reddit";
+  if (/biggerpockets|bigger pockets/.test(hay)) return "biggerpockets";
+  return null;
+}
+
+// Randomized length target, injected into the prompt as a hard cap so drafts
+// don't all come out the same size (uniform length is itself an AI tell).
+export interface LengthTier {
+  label: "1-2 sentences" | "3-5 sentences" | "6-8 sentence paragraph";
+  rule: string;
+}
+
+const TIER_MICRO: LengthTier = {
+  label: "1-2 sentences",
+  rule: "LENGTH — HARD CAP: 1 to 2 sentences total. Not 3. If the point doesn't fit in 2 sentences, cut it down until it does."
+};
+const TIER_SHORT: LengthTier = {
+  label: "3-5 sentences",
+  rule: "LENGTH — HARD CAP: 3 to 5 sentences total, as one short block of prose."
+};
+const TIER_PARAGRAPH: LengthTier = {
+  label: "6-8 sentence paragraph",
+  rule: "LENGTH — one paragraph of 6 to 8 sentences. HARD CAP: 8 sentences, single paragraph."
+};
+
+// Base odds are 30% micro / 50% short / 20% paragraph. Reddit skews shorter
+// (40/50/10). BiggerPockets uses the middle tier as its floor (0/70/30):
+// one-line replies read as drive-bys on a forum where threads live for days.
+export function pickLengthTier(
+  platform: DiscussionPlatform,
+  roll: number = Math.random()
+): LengthTier {
+  const [micro, short] = platform === "reddit" ? [0.4, 0.5] : [0, 0.7];
+  if (roll < micro) return TIER_MICRO;
+  if (roll < micro + short) return TIER_SHORT;
+  return TIER_PARAGRAPH;
+}
+
+function discussionStyleSection(
+  p: DrafterProfile,
+  platform: DiscussionPlatform,
+  tier: LengthTier,
+  hasComments: boolean
+): string {
+  const pro = p.role === "realtor" ? "real estate" : "mortgage and real estate";
+  const platformTone =
+    platform === "reddit"
+      ? "This is Reddit: casual, direct, zero polish. It should read like a comment typed on a phone by someone who knows what they're talking about."
+      : "This is BiggerPockets: investor-to-investor, technical detail is welcome, still conversational.";
+
+  const reactBlock = hasComments
+    ? `THE THREAD ALREADY HAS A DISCUSSION. The top existing comments are included below the post. React to what commenters said instead of answering the original poster from scratch: agree with a specific take and add what it's missing, push back on one that's wrong, or say the thing every commenter missed. The reply should read like it was written by someone who read the whole thread, not just the title.`
+    : platform === "biggerpockets"
+      ? `The thread text below is crawled page text and may include replies from other users after the original post. If replies are present, treat them as the existing discussion and react to them (agree, push back, or add what everyone missed) instead of answering the original poster from scratch. If there are no replies, respond to the original poster directly.`
+      : `No comments were captured for this thread, so respond to the original poster directly.`;
+
+  return `
+HOW TO WRITE THIS REPLY — this section overrides anything above about response structure, word counts, or credibility-weaving:
+
+ONE POINT ONLY. First decide the single most valuable thing ${p.firstName} could add to this thread: the one point an experienced pro would actually bother to make. Then write ONLY that point. Do not answer every question the poster asked. Do not cover the topic comprehensively. Do not tack on a second point while you're at it. One point, made plainly, then stop.
+
+${tier.rule}
+
+${reactBlock}
+
+Voice: ${p.firstName} is an experienced ${pro} professional with strong opinions who picks the one thing worth saying and says it plainly. Sentence fragments are fine. Starting a sentence with "And" or "But" is fine. Plain punctuation only: periods, commas, question marks, apostrophes, and the occasional parenthesis. ${platformTone}
+
+Concrete detail: when the topic makes it natural, include one specific number or mechanic (a rate spread, a reserve requirement, months of cash-flow math, an LTV cap) instead of general advice. If no number fits naturally, skip it. Never invent a personal anecdote and never claim a specific past deal.
+
+BANNED — the reply must not contain any of these:
+- An opening that restates or validates the question. Nothing like "Great question", "Pretty common structure", "This is a common situation", or "A lot of people ask this". Start inside the point itself.
+- A closing advice sentence. Nothing like "talk to an attorney", "consult a loan officer", or "worth running by a professional". End on the substance of the point.
+- Any mention of loan officers, lenders, brokers, or financing services as a suggestion${platform === "reddit" ? " (Reddit especially — never do it there)" : ""}.
+- Numbered lists, bullet points, headers, and em-dashes. Prose only.
+- Symmetric hedging: no "on one hand... on the other", and no "it depends" as the whole answer. Pick a side.
+- Semicolons, and colon-then-list constructions ("three things: a, b, c"). Plain sentences only.`.trim();
+}
+
+interface DiscussionContext {
+  platform: DiscussionPlatform;
+  tier: LengthTier;
+  hasComments: boolean;
+}
+
+// Build the system prompt: role-specific base profile + (for Reddit/BP) the
+// one-point discussion style + the platform contact rules + strict-sub
+// overrides where applicable + the humanizer style rules.
 function buildSystemPrompt(
   policy: ContactPolicy,
   platformLabel: string,
   p: DrafterProfile,
-  redditPolicy: SubredditPolicy | null
+  redditPolicy: SubredditPolicy | null,
+  discussion: DiscussionContext | null
 ): string {
-  const base = p.role === "realtor" ? buildRealtorBaseProfile(p) : buildLoBaseProfile(p);
+  const base =
+    p.role === "realtor"
+      ? buildRealtorBaseProfile(p, !!discussion)
+      : buildLoBaseProfile(p, !!discussion);
+  const style = discussion
+    ? `\n\n${discussionStyleSection(p, discussion.platform, discussion.tier, discussion.hasComments)}`
+    : "";
   const strict = redditPolicy === "STRICT_NO_PROMO" ? `\n\n${strictNoPromoSection(p)}` : "";
-  return `${base}\n\n${contactSection(policy, platformLabel, p)}${strict}\n\n${HUMANIZER_RULES}`;
+  return `${base}${style}\n\n${contactSection(policy, platformLabel, p)}${strict}\n\n${HUMANIZER_RULES}`;
 }
 
 // ─── Drafting ────────────────────────────────────────────────────────────────
@@ -314,6 +431,10 @@ export interface DraftRequest {
   author: string;
   body: string;
   intent_tier: IntentTier;
+  // Top scraped comments already on the thread (Reddit scout captures these).
+  // When present, the discussion-style prompt reacts to them instead of
+  // answering the OP from scratch.
+  comments?: string[] | null;
 }
 
 export interface DraftResult {
@@ -345,7 +466,36 @@ export async function draftResponse(
   const policy = resolveContactPolicy(req.community, req.source, profile.role);
   const redditPolicy = leadRedditPolicy(req.community, req.source);
   const platformLabel = req.community || req.source || "community";
-  const system = buildSystemPrompt(policy, platformLabel, profile, redditPolicy);
+
+  // Reddit/BiggerPockets get the one-point discussion style; everything else
+  // keeps the legacy comprehensive-answer prompt.
+  const discussionPlatform = detectDiscussionPlatform(req.community, req.source);
+  const comments = (req.comments || [])
+    .map((c) => c.trim())
+    .filter(Boolean)
+    .slice(0, 5);
+  const discussion: DiscussionContext | null = discussionPlatform
+    ? {
+        platform: discussionPlatform,
+        tier: pickLengthTier(discussionPlatform),
+        hasComments: comments.length > 0
+      }
+    : null;
+
+  const system = buildSystemPrompt(policy, platformLabel, profile, redditPolicy, discussion);
+
+  const commentsBlock =
+    comments.length > 0
+      ? `\n\nTop existing comments on the thread (in thread order):\n${comments
+          .map((c, i) => `[Comment ${i + 1}] ${c.slice(0, 600)}`)
+          .join("\n\n")}`
+      : "";
+
+  // In discussion mode, "chosen_point" comes before drafted_response so the
+  // model commits to the single point before it starts writing the reply.
+  const chosenPointLine = discussion
+    ? `\n  "chosen_point": "<one sentence: the single most valuable point this reply will make>",`
+    : "";
 
   const userPrompt = `
 Community: ${req.community}
@@ -357,13 +507,13 @@ Author: ${req.author}
 Post body:
 """
 ${req.body}
-"""
+"""${commentsBlock}
 
 Return a JSON object with these exact keys (no markdown fences, no commentary):
 {
   "primary_intent": "<2-5 word label, e.g. 'DSCR lender referral' or 'First-time buyer prep'>",
   "key_question": "<short quote or paraphrase of what they're actually asking>",
-  "reason_selected": "<one sentence on why this lead is worth ${profile.firstName}'s time>",
+  "reason_selected": "<one sentence on why this lead is worth ${profile.firstName}'s time>",${chosenPointLine}
   "drafted_response": "<the full reply ${profile.firstName} would post, following the structure rules>"
 }
 `.trim();
@@ -385,7 +535,17 @@ Return a JSON object with these exact keys (no markdown fences, no commentary):
 
   let result: DraftResult;
   try {
-    result = { ...(JSON.parse(cleaned) as Omit<DraftResult, "blocked_reason">), blocked_reason: null };
+    // Pick fields explicitly — discussion mode adds a "chosen_point" scratch
+    // key that must not ride along into the result.
+    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    result = {
+      primary_intent: typeof parsed.primary_intent === "string" ? parsed.primary_intent : req.intent_tier,
+      key_question: typeof parsed.key_question === "string" ? parsed.key_question : req.post_title,
+      reason_selected:
+        typeof parsed.reason_selected === "string" ? parsed.reason_selected : "Auto-captured by scout.",
+      drafted_response: typeof parsed.drafted_response === "string" ? parsed.drafted_response : "",
+      blocked_reason: null
+    };
   } catch {
     // Fallback: stuff the whole text into drafted_response if JSON parsing fails.
     result = {
@@ -400,12 +560,7 @@ Return a JSON object with these exact keys (no markdown fences, no commentary):
   // Post-generation sanitizer — deterministic, runs regardless of what the
   // model produced. Reddit gets the full rule set (strict unless the sub is
   // explicitly STANDARD); BiggerPockets gets contact + solicitation rules.
-  const hay = `${req.community} ${req.source}`.toLowerCase();
-  const sanitizerPlatform = /reddit|(^|\s)\/?r\//.test(hay)
-    ? ("reddit" as const)
-    : /biggerpockets|bigger pockets/.test(hay)
-      ? ("biggerpockets" as const)
-      : null;
+  const sanitizerPlatform = discussionPlatform;
   if (sanitizerPlatform && result.drafted_response) {
     const check = sanitizeDraft(result.drafted_response, {
       platform: sanitizerPlatform,

@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "backfill": "tsx scripts/backfill.ts"
+    "backfill": "tsx scripts/backfill.ts",
+    "regen-drafts": "tsx scripts/regen-drafts.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

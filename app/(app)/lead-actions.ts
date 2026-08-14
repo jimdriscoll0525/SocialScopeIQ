@@ -46,7 +46,8 @@ export async function claimLead(id: string): Promise<ClaimResult> {
           post_title: lead.post_title || "",
           author: lead.author || "Unknown",
           body: lead.post_body || lead.key_question || lead.post_title || "",
-          intent_tier: lead.intent_tier || "TIER 2"
+          intent_tier: lead.intent_tier || "TIER 2",
+          comments: lead.post_comments
         },
         buildDrafterProfile(profileRow as Profile)
       );

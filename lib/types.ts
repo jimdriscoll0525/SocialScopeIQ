@@ -47,6 +47,7 @@ export interface Lead {
   author: string | null;
   post_url: string | null;
   post_body: string | null;
+  post_comments: string[] | null;
   group_url: string | null;
   intent_tier: IntentTier | null;
   primary_intent: string | null;
@@ -56,6 +57,9 @@ export interface Lead {
   draft_blocked_reason: string | null;
   response_status: ResponseStatus;
   response_link: string | null;
+  // First time response_status moved to POSTED/REPLIED/ENGAGED — powers the
+  // dashboard's burst-posting pacing warning.
+  posted_at: string | null;
   followup_status: FollowupStatus;
   notes: string | null;
   detected_state: DetectedStateValue | null;
@@ -68,9 +72,10 @@ export interface Lead {
 
 export type LeadInsert = Omit<
   Lead,
-  "id" | "created_at" | "updated_at" | "response_status" | "followup_status" | "feeds" | "claimed_by" | "claimed_at" | "claimed_draft" | "post_body" | "group_url" | "draft_blocked_reason"
+  "id" | "created_at" | "updated_at" | "response_status" | "followup_status" | "feeds" | "claimed_by" | "claimed_at" | "claimed_draft" | "post_body" | "post_comments" | "posted_at" | "group_url" | "draft_blocked_reason"
 > & {
   post_body?: string | null;
+  post_comments?: string[] | null;
   group_url?: string | null;
   draft_blocked_reason?: string | null;
   response_status?: ResponseStatus;
@@ -127,4 +132,7 @@ export interface ScoutResult {
   source: string;
   body: string;
   posted_at: string;
+  // Top comments already on the thread, when the scout captures them
+  // (currently Reddit only; BiggerPockets replies arrive inline in `body`).
+  comments?: string[];
 }

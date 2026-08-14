@@ -15,8 +15,13 @@ import { isBlockedSubreddit } from "../compliance";
 const CUTOFF_SECONDS = 60 * 60 * 48;
 
 // Posts per subreddit. Maps to Apify `maxPostCount` (per-page); `maxItems` is
-// the global dataset ceiling (subs * MAX_PER_SUB).
+// the global dataset ceiling (subs * MAX_PER_SUB * (1 + comments)).
 const MAX_PER_SUB = 25;
+
+// Top comments captured per post, so the drafter can react to the existing
+// discussion instead of answering the OP cold. Comments are extra dataset
+// items on the Apify run (per-result pricing), so keep this small.
+const MAX_COMMENTS_PER_POST = 5;
 
 // --- Apify Reddit Scraper Lite — async read/trigger pattern ---------------
 //
@@ -61,6 +66,7 @@ interface ApifyRedditPost {
   body?: string;
   username?: string;      // author handle (Apify uses `username`, not `author`)
   url?: string;
+  postUrl?: string;       // on comment items: the parent post's URL
   communityName?: string; // e.g. "r/Mortgages"
   createdAt?: string;     // ISO 8601
   over18?: boolean;
@@ -73,7 +79,11 @@ function buildInput(subreddits: string[]) {
   return {
     startUrls: subreddits.map((s) => ({ url: `https://www.reddit.com/r/${s}/new/` })),
     sort: "new",
-    skipComments: true,
+    // Comments ON: the drafter reacts to the existing discussion. Each comment
+    // is a dataset item, so maxItems grows by (1 + MAX_COMMENTS_PER_POST)x —
+    // roughly 6x the per-result Apify cost of the old posts-only run.
+    skipComments: false,
+    maxComments: MAX_COMMENTS_PER_POST,
     skipUserPosts: true,
     skipCommunity: true,
     searchPosts: true,
@@ -81,7 +91,7 @@ function buildInput(subreddits: string[]) {
     searchCommunities: false,
     searchUsers: false,
     maxPostCount: MAX_PER_SUB,
-    maxItems: subreddits.length * MAX_PER_SUB,
+    maxItems: subreddits.length * MAX_PER_SUB * (1 + MAX_COMMENTS_PER_POST),
     includeNSFW: false, // actor defaults this to true — opt out explicitly
     proxy: { useApifyProxy: true, apifyProxyGroups: ["RESIDENTIAL"] }
   };
@@ -121,7 +131,7 @@ async function apifyJson(token: string, path: string, init?: RequestInit): Promi
 // scout produced: community = "Reddit" (platform), source = the sub (e.g.
 // "r/Mortgages"). The state filter, drafter, and dashboard all key off this
 // shape, so keeping it identical means no downstream changes.
-function toResult(p: ApifyRedditPost): ScoutResult | null {
+function toResult(p: ApifyRedditPost, comments: string[]): ScoutResult | null {
   if (!p.url || !p.title) return null;
   const createdMs = p.createdAt ? Date.parse(p.createdAt) : NaN;
   const posted_at = Number.isNaN(createdMs)
@@ -134,8 +144,35 @@ function toResult(p: ApifyRedditPost): ScoutResult | null {
     community: "Reddit",
     source: p.communityName || "Reddit",
     body: p.body || "",
-    posted_at
+    posted_at,
+    comments
   };
+}
+
+// Reddit post and comment permalinks share a /comments/<postId>/ segment —
+// the join key between a comment item and its parent post.
+const POST_ID_RE = /\/comments\/([a-z0-9]+)/i;
+
+function postIdOf(url: string | undefined): string | null {
+  const m = url?.match(POST_ID_RE);
+  return m ? m[1].toLowerCase() : null;
+}
+
+// Group comment items by parent post id, keeping the first few substantive
+// bodies in dataset order (the actor emits them in thread order).
+function groupComments(items: ApifyRedditPost[]): Map<string, string[]> {
+  const byPost = new Map<string, string[]>();
+  for (const it of items) {
+    if (it.dataType !== "comment") continue;
+    const id = postIdOf(it.postUrl) || postIdOf(it.url);
+    const body = (it.body || "").trim();
+    if (!id || !body || /^\[(deleted|removed)\]$/i.test(body)) continue;
+    const list = byPost.get(id) || [];
+    if (list.length >= MAX_COMMENTS_PER_POST) continue;
+    list.push(body.slice(0, 600));
+    byPost.set(id, list);
+  }
+  return byPost;
 }
 
 // Read + map the dataset of the most recent SUCCEEDED run. [] if none exists
@@ -150,17 +187,22 @@ async function readLastSucceededRun(token: string): Promise<ScoutResult[]> {
     return [];
   }
 
-  const items = await apifyJson(token, `/datasets/${datasetId}/items?clean=true&limit=500`);
+  // Comments are extra dataset items, so the read limit scales with them.
+  const items = await apifyJson(
+    token,
+    `/datasets/${datasetId}/items?clean=true&limit=${500 * (1 + MAX_COMMENTS_PER_POST)}`
+  );
   if (!Array.isArray(items)) {
     console.warn("[reddit] dataset items were not an array — returning none");
     return [];
   }
 
+  const commentsByPost = groupComments(items as ApifyRedditPost[]);
   const nowSeconds = Math.floor(Date.now() / 1000);
   const results = (items as ApifyRedditPost[])
     .filter((p) => p.dataType === undefined || p.dataType === "post")
     .filter((p) => !p.over18 && !p.isAd)
-    .map(toResult)
+    .map((p) => toResult(p, commentsByPost.get(postIdOf(p.url) || "") || []))
     .filter((r): r is ScoutResult => r !== null)
     // Blocklist gate on the READ path too: the last succeeded Apify dataset
     // may predate a blocklist change and still contain posts from a sub we

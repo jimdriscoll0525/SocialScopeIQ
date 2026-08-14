@@ -170,6 +170,18 @@ export async function runScout(): Promise<ScoutSummary> {
   const errors: { url: string; error: string }[] = [];
   const ownerProfile = await getOwnerProfile(supabase);
 
+  // Insert with a fallback for the window before migration 013 is applied:
+  // if the post_comments column doesn't exist yet, retry without it rather
+  // than dropping the lead.
+  const insertLead = async (lead: LeadInsert) => {
+    let { error } = await supabase.from("leads").insert(lead);
+    if (error && lead.post_comments && /post_comments/.test(error.message)) {
+      const { post_comments: _dropped, ...rest } = lead;
+      ({ error } = await supabase.from("leads").insert(rest));
+    }
+    return error;
+  };
+
   for (const c of toDraft) {
     try {
       const draft = await draftResponse(
@@ -179,7 +191,8 @@ export async function runScout(): Promise<ScoutSummary> {
           post_title: c.post_title,
           author: c.author,
           body: c.body,
-          intent_tier: c.intent_tier!
+          intent_tier: c.intent_tier!,
+          comments: c.comments
         },
         ownerProfile
       );
@@ -197,6 +210,7 @@ export async function runScout(): Promise<ScoutSummary> {
         author: c.author,
         post_url: c.post_url,
         post_body: c.body.slice(0, 4000),
+        post_comments: c.comments?.length ? c.comments : null,
         intent_tier: c.intent_tier!,
         primary_intent: draft.primary_intent,
         key_question: draft.key_question,
@@ -208,7 +222,7 @@ export async function runScout(): Promise<ScoutSummary> {
         detected_state: c.state_result.state
       };
 
-      const { error } = await supabase.from("leads").insert(lead);
+      const error = await insertLead(lead);
       if (error) errors.push({ url: c.post_url, error: error.message });
       else {
         inserted++;
@@ -239,6 +253,7 @@ export async function runScout(): Promise<ScoutSummary> {
       author: c.author,
       post_url: c.post_url,
       post_body: c.body.slice(0, 4000),
+      post_comments: c.comments?.length ? c.comments : null,
       intent_tier: realtorCategoryTier(cls.category),
       primary_intent: realtorCategoryLabel(cls.category),
       key_question: c.post_title,
@@ -249,7 +264,7 @@ export async function runScout(): Promise<ScoutSummary> {
       detected_state: c.state_result.state
     };
 
-    const { error } = await supabase.from("leads").insert(lead);
+    const error = await insertLead(lead);
     if (error) errors.push({ url: c.post_url, error: error.message });
     else realtorInserted++;
   }

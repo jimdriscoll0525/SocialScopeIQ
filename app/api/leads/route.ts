@@ -23,6 +23,18 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "no valid fields" }, { status: 400 });
   }
 
+  // Stamp posted_at the first time a lead's status moves to a posted state —
+  // the dashboard's pacing warning counts these per platform per 24h. If the
+  // select fails (migration 013 not applied yet), skip the stamp silently.
+  if (["POSTED", "REPLIED", "ENGAGED"].includes(update.response_status as string)) {
+    const { data: cur } = await supabase
+      .from("leads")
+      .select("posted_at")
+      .eq("id", id)
+      .maybeSingle();
+    if (cur && !cur.posted_at) update.posted_at = new Date().toISOString();
+  }
+
   // .select() makes a silent no-op visible: an update RLS filters out matches
   // zero rows WITHOUT an error, which used to be reported as success — the
   // dashboard kept the optimistic value and the change never persisted
