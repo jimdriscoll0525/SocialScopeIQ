@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState, useTransition } from "react";
+import { Fragment, memo, useCallback, useDeferredValue, useMemo, useRef, useState, useTransition } from "react";
 import { claimLead } from "@/app/(app)/lead-actions";
 import { leadRedditPolicy, type SubredditPolicy } from "@/lib/compliance";
 import type { Lead, ResponseStatus, FollowupStatus } from "@/lib/types";
@@ -33,15 +33,18 @@ export default function LeadsTable({
   const [stateFilter, setStateFilter] = useState<string>("LICENSED ONLY");
   const [claimFilter, setClaimFilter] = useState<string>("ALL");
   const [query, setQuery] = useState("");
+  // Deferred so typing stays responsive while the 500-row filter catches up.
+  const deferredQuery = useDeferredValue(query);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const toggleExpanded = useCallback((id: string) => setExpanded((cur) => (cur === id ? null : id)), []);
   const [claiming, startClaim] = useTransition();
 
   // The draft a given viewer works with: realtors get their claim-time draft
   // (claimed_draft), loan officers the scout/bookmarklet draft.
   const draftOf = (l: Lead) => (isRealtor ? l.claimed_draft || "" : l.drafted_response || "");
-  const draftField = isRealtor ? "claimed_draft" : "drafted_response";
+  const draftField: "claimed_draft" | "drafted_response" = isRealtor ? "claimed_draft" : "drafted_response";
 
-  function claim(id: string) {
+  const claim = useCallback((id: string) => {
     startClaim(async () => {
       const res = await claimLead(id);
       if (res.ok) {
@@ -60,7 +63,7 @@ export default function LeadsTable({
         flash(`Claim failed: ${res.reason}`);
       }
     });
-  }
+  }, []);
 
   const communities = useMemo(() => {
     const s = new Set<string>();
@@ -80,16 +83,16 @@ export default function LeadsTable({
       }
       if (isRealtor && claimFilter === "AVAILABLE" && l.claimed_by) return false;
       if (isRealtor && claimFilter === "MINE" && l.claimed_by !== currentUserId) return false;
-      if (query) {
-        const q = query.toLowerCase();
+      if (deferredQuery) {
+        const q = deferredQuery.toLowerCase();
         const hay = `${l.post_title || ""} ${l.author || ""} ${l.key_question || ""} ${l.primary_intent || ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [leads, tier, status, community, stateFilter, claimFilter, query, isRealtor, currentUserId]);
+  }, [leads, tier, status, community, stateFilter, claimFilter, deferredQuery, isRealtor, currentUserId]);
 
-  async function copyResponse(lead: Lead) {
+  const copyResponse = useCallback(async (lead: Lead) => {
     const text = draftOf(lead);
     if (!text) return;
     try {
@@ -98,41 +101,9 @@ export default function LeadsTable({
     } catch {
       flash("Copy failed — select & copy manually.");
     }
-  }
+  }, [isRealtor]);
 
-  // Called when a lead's status moves into a posted state. Counts other leads
-  // on the same platform posted in the past 24h and warns past the limit —
-  // a soft throttle only, the status change still goes through.
-  function warnIfBurstPosting(lead: Lead) {
-    if (!lead.community) return;
-    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
-    const recent = leads.filter(
-      (l) =>
-        l.id !== lead.id &&
-        l.community === lead.community &&
-        l.posted_at &&
-        Date.parse(l.posted_at) >= dayAgo
-    ).length;
-    if (recent > PACING_LIMIT) {
-      flash(
-        `Pacing warning: ${recent} replies already posted to ${lead.community} in the past 24h. ` +
-          "Burst posting is a moderation flag — consider spacing this one out."
-      );
-    }
-  }
-
-  function changeStatus(lead: Lead, next: ResponseStatus) {
-    const fields: Partial<Lead> = { response_status: next };
-    if (POSTED_STATUSES.has(next) && !POSTED_STATUSES.has(lead.response_status)) {
-      warnIfBurstPosting(lead);
-      // Optimistic local stamp so same-session pacing counts stay accurate;
-      // the API sets the authoritative value and ignores this field.
-      if (!lead.posted_at) fields.posted_at = new Date().toISOString();
-    }
-    patch(lead.id, fields);
-  }
-
-  async function patch(id: string, fields: Partial<Lead>) {
+  const patch = useCallback(async (id: string, fields: Partial<Lead>) => {
     // Functional updates + single-row revert: a stale `leads` snapshot here
     // used to clobber other in-flight edits on failure.
     let prev: Lead | undefined;
@@ -153,9 +124,45 @@ export default function LeadsTable({
       flash(`Save failed${body?.error ? ` — ${body.error}` : ""}. Refresh the page and try again.`);
       setLeads((cur) => cur.map((l) => (l.id === id && prev ? prev : l)));
     }
+  }, []);
+
+  // Called when a lead's status moves into a posted state. Counts other leads
+  // on the same platform posted in the past 24h and warns past the limit —
+  // a soft throttle only, the status change still goes through.
+  function warnIfBurstPosting(lead: Lead, all: Lead[]) {
+    if (!lead.community) return;
+    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const recent = all.filter(
+      (l) =>
+        l.id !== lead.id &&
+        l.community === lead.community &&
+        l.posted_at &&
+        Date.parse(l.posted_at) >= dayAgo
+    ).length;
+    if (recent > PACING_LIMIT) {
+      flash(
+        `Pacing warning: ${recent} replies already posted to ${lead.community} in the past 24h. ` +
+          "Burst posting is a moderation flag — consider spacing this one out."
+      );
+    }
   }
 
-  async function remove(id: string) {
+  // Ref so changeStatus stays referentially stable (memoized rows) while the
+  // pacing check still sees the latest leads.
+  const leadsRef = useRef(leads);
+  leadsRef.current = leads;
+  const changeStatus = useCallback((lead: Lead, next: ResponseStatus) => {
+    const fields: Partial<Lead> = { response_status: next };
+    if (POSTED_STATUSES.has(next) && !POSTED_STATUSES.has(lead.response_status)) {
+      warnIfBurstPosting(lead, leadsRef.current);
+      // Optimistic local stamp so same-session pacing counts stay accurate;
+      // the API sets the authoritative value and ignores this field.
+      if (!lead.posted_at) fields.posted_at = new Date().toISOString();
+    }
+    patch(lead.id, fields);
+  }, [patch]);
+
+  const remove = useCallback(async (id: string) => {
     if (!confirm("Delete this lead?")) return;
     let removed: Lead | undefined;
     setLeads((cur) => {
@@ -168,7 +175,7 @@ export default function LeadsTable({
       flash(`Delete failed${body?.error ? ` — ${body.error}` : ""}. Refresh the page and try again.`);
       if (removed) setLeads((cur) => (cur.some((l) => l.id === id) ? cur : [...cur, removed!]));
     }
-  }
+  }, []);
 
   return (
     <>
@@ -208,142 +215,24 @@ export default function LeadsTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-100">
-            {filtered.map((l) => {
-              const isOpen = expanded === l.id;
-              const isMine = isRealtor && l.claimed_by === currentUserId;
-              return (
-                <Fragment key={l.id}>
-                  <tr className={`hover:bg-neutral-50 ${l.response_status === "DELETED" ? "opacity-50" : ""}`}>
-                    <td className="px-3 py-2 align-top text-neutral-600">{l.date_found}</td>
-                    <td className="px-3 py-2 align-top">
-                      <StateBadge state={l.detected_state} />
-                    </td>
-                    <td className="px-3 py-2 align-top">
-                      <TierBadge tier={l.intent_tier} />
-                    </td>
-                    <td className="px-3 py-2 align-top">
-                      <div className="font-medium">{l.community}</div>
-                      <div className="text-xs text-neutral-500">{l.source}</div>
-                      <PolicyBadge policy={leadRedditPolicy(l.community, l.source)} />
-                    </td>
-                    <td className="px-3 py-2 align-top">
-                      {l.draft_blocked_reason && (
-                        <span
-                          className="mr-2 rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-800"
-                          title={l.draft_blocked_reason}
-                        >
-                          DRAFT BLOCKED
-                        </span>
-                      )}
-                      <button
-                        className="text-left font-medium text-neutral-900 hover:underline"
-                        onClick={() => setExpanded(isOpen ? null : l.id)}
-                      >
-                        {l.post_title}
-                      </button>
-                      {l.post_url && (
-                        <div className="text-xs">
-                          <a className="text-blue-600 hover:underline" href={l.post_url} target="_blank" rel="noreferrer">
-                            open post ↗
-                          </a>
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 align-top text-neutral-600">{l.author}</td>
-                    <td className="px-3 py-2 align-top text-neutral-600">{l.primary_intent}</td>
-                    <td className="px-3 py-2 align-top">
-                      <select
-                        value={l.response_status}
-                        onChange={(e) => changeStatus(l, e.target.value as ResponseStatus)}
-                        className="rounded border border-neutral-300 bg-white px-2 py-1 text-xs"
-                      >
-                        {STATUS_OPTIONS.map((s) => <option key={s}>{s}</option>)}
-                      </select>
-                    </td>
-                    <td className="px-3 py-2 align-top">
-                      <select
-                        value={l.followup_status}
-                        onChange={(e) => patch(l.id, { followup_status: e.target.value as FollowupStatus })}
-                        className="rounded border border-neutral-300 bg-white px-2 py-1 text-xs"
-                      >
-                        {FOLLOWUP_OPTIONS.map((s) => <option key={s}>{s}</option>)}
-                      </select>
-                    </td>
-                    {isRealtor && (
-                      <td className="px-3 py-2 align-top">
-                        {isMine ? (
-                          <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
-                            Mine
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => claim(l.id)}
-                            disabled={claiming}
-                            className="rounded bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-                          >
-                            Claim
-                          </button>
-                        )}
-                      </td>
-                    )}
-                    <td className="px-3 py-2 align-top">
-                      <div className="flex gap-1">
-                        <button
-                          onClick={() => copyResponse(l)}
-                          className="rounded bg-black px-2 py-1 text-xs text-white hover:bg-neutral-800"
-                        >
-                          Copy
-                        </button>
-                        <button
-                          onClick={() => remove(l.id)}
-                          className="rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-600 hover:bg-neutral-100"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                  {isOpen && (
-                    <tr className="bg-neutral-50">
-                      <td colSpan={isRealtor ? 11 : 10} className="px-3 py-4">
-                        {l.draft_blocked_reason && (
-                          <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-                            <span className="font-semibold">Draft blocked by the compliance sanitizer — do not post as-is.</span>{" "}
-                            Reason: {l.draft_blocked_reason}. Rewrite the draft below, removing the flagged
-                            content, before using it.
-                          </div>
-                        )}
-                        <div className="grid gap-4 md:grid-cols-2">
-                          <Field label="Key question" value={l.key_question} />
-                          <Field label="Reason selected" value={l.reason_selected} />
-                          <FieldEditable
-                            label={isRealtor ? "Your draft" : "Drafted response"}
-                            value={draftOf(l)}
-                            onSave={(v) => patch(l.id, { [draftField]: v })}
-                            rows={14}
-                            withCopy
-                          />
-                          <div className="space-y-3">
-                            <FieldEditable
-                              label="Response link (where you posted)"
-                              value={l.response_link || ""}
-                              onSave={(v) => patch(l.id, { response_link: v })}
-                              rows={1}
-                            />
-                            <FieldEditable
-                              label="Notes"
-                              value={l.notes || ""}
-                              onSave={(v) => patch(l.id, { notes: v })}
-                              rows={6}
-                            />
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              );
-            })}
+            {filtered.map((l) => (
+              <LeadRow
+                key={l.id}
+                lead={l}
+                isOpen={expanded === l.id}
+                isRealtor={isRealtor}
+                isMine={isRealtor && l.claimed_by === currentUserId}
+                claiming={claiming}
+                draft={draftOf(l)}
+                draftField={draftField}
+                onToggle={toggleExpanded}
+                onClaim={claim}
+                onCopy={copyResponse}
+                onRemove={remove}
+                onPatch={patch}
+                onChangeStatus={changeStatus}
+              />
+            ))}
             {filtered.length === 0 && (
               <tr>
                 <td colSpan={isRealtor ? 11 : 10} className="px-3 py-12 text-center text-neutral-500">
@@ -357,6 +246,161 @@ export default function LeadsTable({
     </>
   );
 }
+
+// One table row (+ its expanded detail row). Memoized so a state change on one
+// lead — expanding it, editing a status, typing in search — doesn't re-render
+// all 500 rows; that full-table re-render was what made clicks feel laggy.
+const LeadRow = memo(function LeadRow({
+  lead: l, isOpen, isRealtor, isMine, claiming, draft, draftField,
+  onToggle, onClaim, onCopy, onRemove, onPatch, onChangeStatus
+}: {
+  lead: Lead;
+  isOpen: boolean;
+  isRealtor: boolean;
+  isMine: boolean;
+  claiming: boolean;
+  draft: string;
+  draftField: "claimed_draft" | "drafted_response";
+  onToggle: (id: string) => void;
+  onClaim: (id: string) => void;
+  onCopy: (lead: Lead) => void;
+  onRemove: (id: string) => void;
+  onPatch: (id: string, fields: Partial<Lead>) => void;
+  onChangeStatus: (lead: Lead, next: ResponseStatus) => void;
+}) {
+  return (
+    <Fragment>
+      <tr className={`hover:bg-neutral-50 ${l.response_status === "DELETED" ? "opacity-50" : ""}`}>
+        <td className="px-3 py-2 align-top text-neutral-600">{l.date_found}</td>
+        <td className="px-3 py-2 align-top">
+          <StateBadge state={l.detected_state} />
+        </td>
+        <td className="px-3 py-2 align-top">
+          <TierBadge tier={l.intent_tier} />
+        </td>
+        <td className="px-3 py-2 align-top">
+          <div className="font-medium">{l.community}</div>
+          <div className="text-xs text-neutral-500">{l.source}</div>
+          <PolicyBadge policy={leadRedditPolicy(l.community, l.source)} />
+        </td>
+        <td className="px-3 py-2 align-top">
+          {l.draft_blocked_reason && (
+            <span
+              className="mr-2 rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-800"
+              title={l.draft_blocked_reason}
+            >
+              DRAFT BLOCKED
+            </span>
+          )}
+          <button
+            className="text-left font-medium text-neutral-900 hover:underline"
+            onClick={() => onToggle(l.id)}
+          >
+            {l.post_title}
+          </button>
+          {l.post_url && (
+            <div className="text-xs">
+              <a className="text-blue-600 hover:underline" href={l.post_url} target="_blank" rel="noreferrer">
+                open post ↗
+              </a>
+            </div>
+          )}
+        </td>
+        <td className="px-3 py-2 align-top text-neutral-600">{l.author}</td>
+        <td className="px-3 py-2 align-top text-neutral-600">{l.primary_intent}</td>
+        <td className="px-3 py-2 align-top">
+          <select
+            value={l.response_status}
+            onChange={(e) => onChangeStatus(l, e.target.value as ResponseStatus)}
+            className="rounded border border-neutral-300 bg-white px-2 py-1 text-xs"
+          >
+            {STATUS_OPTIONS.map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </td>
+        <td className="px-3 py-2 align-top">
+          <select
+            value={l.followup_status}
+            onChange={(e) => onPatch(l.id, { followup_status: e.target.value as FollowupStatus })}
+            className="rounded border border-neutral-300 bg-white px-2 py-1 text-xs"
+          >
+            {FOLLOWUP_OPTIONS.map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </td>
+        {isRealtor && (
+          <td className="px-3 py-2 align-top">
+            {isMine ? (
+              <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                Mine
+              </span>
+            ) : (
+              <button
+                onClick={() => onClaim(l.id)}
+                disabled={claiming}
+                className="rounded bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                Claim
+              </button>
+            )}
+          </td>
+        )}
+        <td className="px-3 py-2 align-top">
+          <div className="flex gap-1">
+            <button
+              onClick={() => onCopy(l)}
+              className="rounded bg-black px-2 py-1 text-xs text-white hover:bg-neutral-800"
+            >
+              Copy
+            </button>
+            <button
+              onClick={() => onRemove(l.id)}
+              className="rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-600 hover:bg-neutral-100"
+            >
+              ×
+            </button>
+          </div>
+        </td>
+      </tr>
+      {isOpen && (
+        <tr className="bg-neutral-50">
+          <td colSpan={isRealtor ? 11 : 10} className="px-3 py-4">
+            {l.draft_blocked_reason && (
+              <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                <span className="font-semibold">Draft blocked by the compliance sanitizer — do not post as-is.</span>{" "}
+                Reason: {l.draft_blocked_reason}. Rewrite the draft below, removing the flagged
+                content, before using it.
+              </div>
+            )}
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="Key question" value={l.key_question} />
+              <Field label="Reason selected" value={l.reason_selected} />
+              <FieldEditable
+                label={isRealtor ? "Your draft" : "Drafted response"}
+                value={draft}
+                onSave={(v) => onPatch(l.id, { [draftField]: v })}
+                rows={14}
+                withCopy
+              />
+              <div className="space-y-3">
+                <FieldEditable
+                  label="Response link (where you posted)"
+                  value={l.response_link || ""}
+                  onSave={(v) => onPatch(l.id, { response_link: v })}
+                  rows={1}
+                />
+                <FieldEditable
+                  label="Notes"
+                  value={l.notes || ""}
+                  onSave={(v) => onPatch(l.id, { notes: v })}
+                  rows={6}
+                />
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </Fragment>
+  );
+});
 
 // Compliance policy badge for Reddit leads (see lib/compliance.ts).
 function PolicyBadge({ policy }: { policy: SubredditPolicy | null }) {
