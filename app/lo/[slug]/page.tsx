@@ -15,7 +15,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return {
     title: `${name} — Mortgage Loan Officer${profile.company ? ` · ${profile.company}` : ""}`,
     description: profile.niche || `Mortgage guidance from ${name}.`,
-    alternates: { canonical: `/lo/${profile.slug}` }
+    alternates: {
+      canonical: `/lo/${profile.slug}`,
+      types: { "application/rss+xml": `/lo/${profile.slug}/rss.xml` }
+    }
   };
 }
 
