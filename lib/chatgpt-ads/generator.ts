@@ -3,6 +3,7 @@ import { DRAFT_MODEL } from "@/lib/config";
 import type { DrafterProfile } from "@/lib/drafter";
 import type { AdBidType } from "@/lib/types";
 import type { AdObjective } from "./objectives";
+import { DESCRIPTION_MAX, TITLE_MAX } from "./format";
 import { withUtm } from "./utm";
 
 // AI campaign package generation for ChatGPT Ads. Same provider/pattern as
@@ -51,7 +52,7 @@ COMPLIANCE — MORTGAGE / FINANCIAL SERVICES (hard rules, every ad):
 - NEVER quote a specific interest rate, APR, or monthly payment (that triggers Truth in Lending disclosure requirements the ad format can't satisfy).
 - NEVER promise cash or describe equity as "free money". Say "may", "could", "options", "explore", "see if".
 - No fear or urgency tactics, no comparisons that disparage banks or other lenders.
-- Every ad_body must END with this disclosure tail exactly: "${nmls}. Equal Housing Lender." (the platform allows it in body copy; the user will trim if their Ads Manager field limit requires it).
+- Every ad_body must END with this disclosure tail exactly: "${nmls}. Equal Housing Lender." The Ads Manager description field is ${DESCRIPTION_MAX} characters TOTAL including this tail, so the copy before the tail must be at most ${DESCRIPTION_MAX - nmls.length - " . Equal Housing Lender.".length - 8} characters (roughly 8-10 words). Shorter is safer; a description over ${DESCRIPTION_MAX} characters will be rejected.
 - Identify the advertiser honestly: ${p.firstName} ${p.lastName}${p.company ? `, ${company}` : ""}.
 - Only promote products that appear in the WHAT THEY OFFER list below. Never invent a product, program, or eligibility rule.
 - Targeting must never reference protected characteristics (race, color, religion, national origin, sex, familial status, disability, age) — target the question being asked, never who is asking.`.trim();
@@ -65,7 +66,7 @@ COMPLIANCE — REAL ESTATE / FAIR HOUSING (hard rules, every ad):
 - Never invent market statistics, comps, days-on-market, or sale prices. No "guaranteed sale", "guaranteed price", or "sell in X days" claims.
 - No urgency or fear tactics, no disparaging other agents or brokerages.
 - Identify the advertiser honestly: ${p.firstName} ${p.lastName}${p.brokerage ? `, ${p.brokerage}` : ""}. Include the brokerage name in ad_body when one is provided.
-- This is NOT a mortgage ad: do not mention NMLS numbers, interest rates, APRs, loan approval, or "Equal Housing Lender". End each ad_body with "Equal Housing Opportunity."
+- This is NOT a mortgage ad: do not mention NMLS numbers, interest rates, APRs, loan approval, or "Equal Housing Lender". End each ad_body with "Equal Housing Opportunity." The Ads Manager description field is ${DESCRIPTION_MAX} characters TOTAL including that tail, so keep the copy before it to at most ${DESCRIPTION_MAX - " Equal Housing Opportunity.".length - 8} characters (roughly 9-11 words). Shorter is safer.
 - Only promote services that appear in the WHAT THEY OFFER list below (when provided). Never invent a service.`.trim();
 }
 
@@ -106,12 +107,12 @@ You are a senior paid-media strategist building a ChatGPT Ads campaign for ${p.f
 HOW CHATGPT ADS WORK (this shapes everything you write):
 - Ads appear inside ChatGPT conversations, matched to what the person is asking about RIGHT NOW. Targeting is intent- and topic-based, not demographic. There are no age/income/interest audiences to pick.
 - So "targeting_instructions" is a written brief for the ad platform describing the conversations this ad belongs in: the user intents, the questions and prompt topics, example prompt phrasings a person might type, adjacent topics to include, and topics to exclude. Write it as instructions ("Show this ad when the user is asking about…"), 80-160 words, then REQUIRED: a final line that begins exactly with "Example prompts:" followed by 5-8 concrete prompts a person might type, each in double quotes and separated by " | ". Then one line "Exclude:" listing topics that should not match. Mention the target market by name where a local angle helps ("…in the ${input.target_market} area").
-- The ad unit is small: a short headline and a brief body. Headline: under 50 characters, specific to the segment, no ALL CAPS, no exclamation marks. Body: 1-2 plain sentences (under 160 characters BEFORE the required disclosure tail), conversational, matching the tone of someone asking ChatGPT a question — helpful, not hype.
+- The ad unit is tiny. The Ads Manager form has exactly these fields per ad: Ad name, Ad destination URL, Landing page query parameters, Title (max ${TITLE_MAX} characters), Description (max ${DESCRIPTION_MAX} characters), and a square image. So: ad_headline = the Title, at most ${TITLE_MAX} characters, specific to the segment, no ALL CAPS, no exclamation marks. ad_body = the Description, ONE short plain sentence plus the required disclosure tail, at most ${DESCRIPTION_MAX} characters in total — conversational, matching the tone of someone asking ChatGPT a question, helpful not hype. These are hard platform limits, not guidelines.
 
 CAMPAIGN STRUCTURE:
 - Produce 4 to 6 ad groups. Each targets a DISTINCT customer need within the objective — different reasons a person would be asking, not rewordings of one reason. Use the segment list below as the starting point; drop or merge segments that don't fit what ${p.firstName} actually offers, and add one if the reference material reveals a clearly better need.
 - Each ad group gets: a short name (2-5 words), an audience_theme (one line), targeting_instructions, ad_headline, ad_body, and ad_image_prompt.
-- ad_image_prompt: a one-paragraph prompt for an image generator — photographic, warm, specific to the segment and to the ${input.target_market} area (housing style, season, landscape), NO text or logos in the image, no people depicted in a way that implies targeting a protected class.
+- ad_image_prompt: a one-paragraph prompt for an image generator — SQUARE 1:1 composition (the platform requires a square PNG/JPG, at least 256x256; ask for 1024x1024), subject centered so it survives cropping to a small thumbnail, photographic, warm, specific to the segment and to the ${input.target_market} area (housing style, season, landscape), NO text or logos in the image, no people depicted in a way that implies targeting a protected class.
 
 ${isRealtor ? realtorCompliance(p) : loCompliance(p)}
 
@@ -153,6 +154,50 @@ Build the campaign package now.
 
 function str(v: unknown, max: number): string {
   return typeof v === "string" ? v.trim().slice(0, max) : "";
+}
+
+// Follow-up call that rewrites over-limit titles/descriptions. Returns a map
+// of ad group name -> shortened fields; the caller only accepts a rewrite
+// that is actually within the limit.
+async function shortenOverLimit(
+  client: Anthropic,
+  groups: GeneratedAdGroup[],
+  profile: DrafterProfile
+): Promise<Record<string, { ad_headline?: string; ad_body?: string }>> {
+  const isRealtor = profile.role === "realtor";
+  const tail = isRealtor
+    ? "Equal Housing Opportunity."
+    : `NMLS #${profile.nmls || "<number>"}. Equal Housing Lender.`;
+  const system = `
+You shorten ad copy to fit hard character limits. Title: at most ${TITLE_MAX} characters. Description: at most ${DESCRIPTION_MAX} characters TOTAL and it must still END with exactly "${tail}". Keep the meaning and the same product, keep the tone, never add rates, guarantees, "pre-approved", or urgency. Prefer cutting words over abbreviating. Return ONLY a JSON object keyed by ad group name: {"<name>": {"ad_headline": "...", "ad_body": "..."}}.`.trim();
+  const user = groups
+    .map(
+      (g) =>
+        `Ad group name: ${g.name}\nTitle (${g.ad_headline.length}/${TITLE_MAX}): ${g.ad_headline}\nDescription (${g.ad_body.length}/${DESCRIPTION_MAX}): ${g.ad_body}`
+    )
+    .join("\n\n");
+  const msg = await client.messages.create({
+    model: DRAFT_MODEL,
+    max_tokens: 1500,
+    system,
+    messages: [{ role: "user", content: user }]
+  });
+  const text = msg.content
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text)
+    .join("")
+    .replace(/^```(?:json)?\s*|\s*```$/g, "")
+    .trim();
+  try {
+    const parsed = JSON.parse(text) as Record<string, Record<string, unknown>>;
+    const out: Record<string, { ad_headline?: string; ad_body?: string }> = {};
+    for (const [name, v] of Object.entries(parsed || {})) {
+      out[name] = { ad_headline: str(v?.ad_headline, 120) || undefined, ad_body: str(v?.ad_body, 600) || undefined };
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 export async function generateCampaignPackage(input: GenerateCampaignInput): Promise<CampaignPackage> {
@@ -202,6 +247,20 @@ export async function generateCampaignPackage(input: GenerateCampaignInput): Pro
     if (ad_groups.length >= 6) break;
   }
   if (ad_groups.length === 0) throw new Error("Campaign generation returned no ad groups. Try again.");
+
+  // Models count characters badly: shorten any description that overshoots
+  // the Ads Manager limit with a focused follow-up call (up to two passes).
+  for (let pass = 0; pass < 2; pass++) {
+    const over = ad_groups.filter((g) => g.ad_body.length > DESCRIPTION_MAX || g.ad_headline.length > TITLE_MAX);
+    if (over.length === 0) break;
+    const fixed = await shortenOverLimit(client, over, input.profile);
+    for (const g of ad_groups) {
+      const f = fixed[g.name];
+      if (!f) continue;
+      if (f.ad_body && f.ad_body.length <= DESCRIPTION_MAX && f.ad_body.length < g.ad_body.length) g.ad_body = f.ad_body;
+      if (f.ad_headline && f.ad_headline.length <= TITLE_MAX && f.ad_headline.length < g.ad_headline.length) g.ad_headline = f.ad_headline;
+    }
+  }
 
   const review_notes = Array.isArray(obj.review_notes)
     ? obj.review_notes.map((n) => str(n, 300)).filter(Boolean).slice(0, 8)

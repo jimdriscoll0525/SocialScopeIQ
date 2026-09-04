@@ -58,3 +58,36 @@ export function isHttpUrl(value: string): boolean {
     return false;
   }
 }
+
+// ─── Ads Manager form split ──────────────────────────────────────────────────
+// The ChatGPT Ads Manager ad form takes an "Ad destination URL" plus a
+// separate "Landing page query parameters" field, which it appends to the
+// destination and which supports template values {campaign_id},
+// {ad_group_id}, {ad_id}, {ad_account_id}, {oppref}. So the export shows the
+// stored (UTM-tagged) URL split into those two pieces, with utm_term carrying
+// the platform's own ad id for per-ad attribution.
+
+export interface AdsManagerUrlParts {
+  destination_url: string; // clean page URL, no utm_*
+  query_parameters: string; // "utm_source=...&utm_term={ad_id}" — paste as-is
+}
+
+export function adsManagerUrlParts(taggedUrl: string): AdsManagerUrlParts {
+  let u: URL;
+  try {
+    u = new URL(taggedUrl.trim());
+  } catch {
+    return { destination_url: taggedUrl.trim(), query_parameters: "" };
+  }
+  const utm = new URLSearchParams();
+  for (const [k, v] of Array.from(u.searchParams.entries())) {
+    if (k.toLowerCase().startsWith("utm_")) {
+      utm.set(k, v);
+      u.searchParams.delete(k);
+    }
+  }
+  if (!utm.has("utm_term")) utm.set("utm_term", "{ad_id}");
+  // URLSearchParams encodes braces; the Ads Manager needs them literal.
+  const query = utm.toString().replace(/%7B/gi, "{").replace(/%7D/gi, "}");
+  return { destination_url: u.toString(), query_parameters: query };
+}

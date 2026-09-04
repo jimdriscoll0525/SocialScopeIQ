@@ -25,8 +25,8 @@ for (const line of fs.readFileSync(envPath, "utf-8").split("\n")) {
 import { buildDrafterProfile, JIM_FALLBACK_PROFILE, type DrafterProfile } from "../lib/drafter";
 import { chatgptAdsService, type GeneratedAdGroup } from "../lib/chatgpt-ads/service";
 import { LO_OBJECTIVES, REALTOR_OBJECTIVES } from "../lib/chatgpt-ads/objectives";
-import { withUtm, campaignSlug, adGroupSlug } from "../lib/chatgpt-ads/utm";
-import { formatFullBrief, formatAdGroupBlock } from "../lib/chatgpt-ads/format";
+import { withUtm, campaignSlug, adGroupSlug, adsManagerUrlParts } from "../lib/chatgpt-ads/utm";
+import { formatFullBrief, formatAdGroupBlock, TITLE_MAX, DESCRIPTION_MAX } from "../lib/chatgpt-ads/format";
 import type { Profile } from "../lib/types";
 
 let failures = 0;
@@ -52,8 +52,11 @@ console.log("\n== UTM + formatting ==");
     { name: "X", objective_label: "Refinance", target_market: "Boston", daily_budget: 25, bid_type: "cpc", landing_page_url: "https://a.b" },
     [{ name: "G1", audience_theme: "t", targeting_instructions: "ti", ad_headline: "h", ad_body: "b", ad_image_prompt: "ip", landing_page_url: "https://a.b/?x" }]
   );
-  check("brief has campaign + group", brief.includes("Campaign name: X") && brief.includes("Ad group 1: G1") && brief.includes("Final URL: https://a.b/?x"));
-  check("group block has headline", formatAdGroupBlock({ name: "G", audience_theme: "", targeting_instructions: "", ad_headline: "HL", ad_body: "", ad_image_prompt: "", landing_page_url: "" }).includes("Headline: HL"));
+  check("brief has campaign + group + split URL", brief.includes("Campaign name: X") && brief.includes("Ad group 1: G1") && brief.includes("Ad destination URL: https://a.b/?x") && brief.includes("Landing page query parameters: utm_term={ad_id}"));
+  check("group block has title", formatAdGroupBlock({ name: "G", audience_theme: "", targeting_instructions: "", ad_headline: "HL", ad_body: "", ad_image_prompt: "", landing_page_url: "" }).includes(`Title (2/${TITLE_MAX}): HL`));
+  const parts = adsManagerUrlParts("https://a.b/page?ref=x&utm_source=chatgpt_ads&utm_medium=paid&utm_campaign=c&utm_content=g");
+  check("split: destination keeps non-utm params", parts.destination_url === "https://a.b/page?ref=x", parts.destination_url);
+  check("split: query params literal braces", parts.query_parameters === "utm_source=chatgpt_ads&utm_medium=paid&utm_campaign=c&utm_content=g&utm_term={ad_id}", parts.query_parameters);
 }
 
 // ─── Generation checks ───────────────────────────────────────────────────────
@@ -66,8 +69,10 @@ function assertGroups(label: string, groups: GeneratedAdGroup[], landing: string
   check(`${label}: distinct themes`, themes.size === groups.length);
   for (const g of groups) {
     const tag = `${label} / ${g.name}`;
-    check(`${tag}: headline present & short (${g.ad_headline.length})`, g.ad_headline.length > 0 && g.ad_headline.length <= 70, g.ad_headline);
-    check(`${tag}: body present`, g.ad_body.length > 0);
+    check(`${tag}: title within ${TITLE_MAX} (${g.ad_headline.length})`, g.ad_headline.length > 0 && g.ad_headline.length <= TITLE_MAX, g.ad_headline);
+    check(`${tag}: description within ${DESCRIPTION_MAX} (${g.ad_body.length})`, g.ad_body.length > 0 && g.ad_body.length <= DESCRIPTION_MAX, g.ad_body);
+    const parts = adsManagerUrlParts(g.landing_page_url);
+    check(`${tag}: Ads Manager URL split`, !/utm_/.test(parts.destination_url) && /utm_campaign=/.test(parts.query_parameters) && parts.query_parameters.includes("utm_term={ad_id}"), JSON.stringify(parts));
     check(`${tag}: targeting has example prompts`, /["“]/.test(g.targeting_instructions) && g.targeting_instructions.length > 150, g.targeting_instructions.slice(0, 120));
     check(`${tag}: targeting is not demographic`, !DEMOGRAPHIC.test(g.targeting_instructions), g.targeting_instructions.match(DEMOGRAPHIC)?.[0]);
     check(`${tag}: image prompt present`, g.ad_image_prompt.length > 20);

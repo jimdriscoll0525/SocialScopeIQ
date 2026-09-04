@@ -8,11 +8,14 @@ import CopyButton from "./CopyButton";
 import {
   BID_TYPE_LABEL,
   CAMPAIGN_STATUS_LABEL,
+  DESCRIPTION_MAX,
+  TITLE_MAX,
   formatAdGroupBlock,
   formatCampaignBlock,
   formatFullBrief,
   formatMoney
 } from "@/lib/chatgpt-ads/format";
+import { adsManagerUrlParts } from "@/lib/chatgpt-ads/utm";
 import type { AdCampaign, AdCampaignStatus, AdGroup, Role } from "@/lib/types";
 
 // Campaign detail: status controls, "Open ChatGPT Ads Manager" checklist, and
@@ -194,8 +197,11 @@ export default function CampaignExport({
             Set the daily budget ({formatMoney(Number(campaign.daily_budget))}) and bid type (
             {campaign.bid_type.toUpperCase()}); choose your pacing.
           </li>
-          <li>Add one ad group per block below, pasting the targeting instructions for each.</li>
-          <li>Paste the headline, body, and final URL into each ad. Generate the image from the prompt if you want a visual.</li>
+          <li>Add one ad group per block below; the targeting instructions go on the ad group step.</li>
+          <li>
+            On the ad step, paste Ad name, Ad destination URL, Landing page query parameters, Title, and
+            Description. Upload a square image (generate one from the prompt if you want a visual).
+          </li>
           <li>Submit for review, then come back and click &quot;Mark as submitted&quot;.</li>
         </ol>
         <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -217,11 +223,26 @@ export default function CampaignExport({
         {groups.map((g, i) => (
           <CopyBlock key={g.id} title={`Ad group ${i + 1}: ${g.name}`} text={formatAdGroupBlock(g, i)}>
             <div className="grid gap-2 text-xs md:grid-cols-2">
-              <Field label="Targeting instructions" value={g.targeting_instructions} wide />
-              <Field label="Headline" value={g.ad_headline} />
-              <Field label="Body" value={g.ad_body} />
-              <Field label="Final URL" value={g.landing_page_url} wide mono />
-              <Field label="Image prompt" value={g.ad_image_prompt} wide />
+              <Field label="Ad group step — targeting instructions" value={g.targeting_instructions} wide />
+              <Field label="Ad step — Ad name" value={g.name} />
+              <Field
+                label={`Title (${g.ad_headline.length}/${TITLE_MAX})`}
+                value={g.ad_headline}
+                warn={g.ad_headline.length > TITLE_MAX}
+              />
+              <Field label="Ad destination URL" value={adsManagerUrlParts(g.landing_page_url).destination_url} mono />
+              <Field
+                label="Landing page query parameters"
+                value={adsManagerUrlParts(g.landing_page_url).query_parameters}
+                mono
+              />
+              <Field
+                label={`Description (${g.ad_body.length}/${DESCRIPTION_MAX}, incl. disclosure)`}
+                value={g.ad_body}
+                wide
+                warn={g.ad_body.length > DESCRIPTION_MAX}
+              />
+              <Field label="Image prompt (square image, at least 256×256)" value={g.ad_image_prompt} wide />
             </div>
           </CopyBlock>
         ))}
@@ -258,17 +279,22 @@ function Field({
   label,
   value,
   wide = false,
-  mono = false
+  mono = false,
+  warn = false
 }: {
   label: string;
   value: string;
   wide?: boolean;
   mono?: boolean;
+  warn?: boolean;
 }) {
   return (
-    <div className={`rounded-md bg-neutral-50 p-3 ${wide ? "md:col-span-2" : ""}`}>
+    <div className={`rounded-md p-3 ${warn ? "bg-red-50" : "bg-neutral-50"} ${wide ? "md:col-span-2" : ""}`}>
       <div className="mb-1 flex items-center justify-between">
-        <span className="font-medium text-neutral-600">{label}</span>
+        <span className={`font-medium ${warn ? "text-red-700" : "text-neutral-600"}`}>
+          {label}
+          {warn ? " — over the Ads Manager limit, trim before pasting" : ""}
+        </span>
         <CopyButton text={value} label="Copy" className="!px-2 !py-0.5" />
       </div>
       <div className={`whitespace-pre-wrap break-words text-neutral-800 ${mono ? "font-mono" : ""}`}>

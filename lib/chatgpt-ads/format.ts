@@ -1,7 +1,15 @@
 import type { AdBidType, AdCampaignStatus } from "@/lib/types";
+import { adsManagerUrlParts } from "./utm";
 
 // Plain-text formatting for the "Copy for ChatGPT Ads Manager" blocks. Pure
 // (no DB, no React) so it's shared by the export view and any future sync.
+//
+// Field names and limits mirror the Ads Manager ad form exactly: Ad name,
+// Ad destination URL, Landing page query parameters, Title (50), Description
+// (100), square image. Targeting lives one level up on the ad group step.
+
+export const TITLE_MAX = 50;
+export const DESCRIPTION_MAX = 100;
 
 export interface CampaignHeader {
   name: string;
@@ -55,18 +63,23 @@ export function formatCampaignBlock(c: CampaignHeader): string {
 
 export function formatAdGroupBlock(g: AdGroupCopy, index?: number): string {
   const title = index != null ? `Ad group ${index + 1}: ${g.name}` : `Ad group: ${g.name}`;
+  const url = adsManagerUrlParts(g.landing_page_url);
+  const over = (len: number, max: number) => (len > max ? ` — OVER LIMIT by ${len - max}` : "");
   return [
     title,
     `Audience theme: ${g.audience_theme}`,
     "",
-    "Targeting instructions:",
+    "AD GROUP STEP — targeting instructions:",
     g.targeting_instructions.trim(),
     "",
-    `Headline: ${g.ad_headline.trim()}`,
-    `Body: ${g.ad_body.trim()}`,
-    `Final URL: ${g.landing_page_url.trim()}`,
+    "AD STEP:",
+    `Ad name: ${g.name}`,
+    `Ad destination URL: ${url.destination_url}`,
+    `Landing page query parameters: ${url.query_parameters}`,
+    `Title (${g.ad_headline.trim().length}/${TITLE_MAX}${over(g.ad_headline.trim().length, TITLE_MAX)}): ${g.ad_headline.trim()}`,
+    `Description (${g.ad_body.trim().length}/${DESCRIPTION_MAX}${over(g.ad_body.trim().length, DESCRIPTION_MAX)}): ${g.ad_body.trim()}`,
     "",
-    "Image prompt:",
+    "Image prompt (square, 1024x1024):",
     g.ad_image_prompt.trim()
   ].join("\n");
 }

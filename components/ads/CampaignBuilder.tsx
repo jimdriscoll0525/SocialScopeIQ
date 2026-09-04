@@ -11,6 +11,7 @@ import {
   type CampaignFormInput
 } from "@/app/(app)/ads/actions";
 import type { AdObjective } from "@/lib/chatgpt-ads/objectives";
+import { DESCRIPTION_MAX, TITLE_MAX } from "@/lib/chatgpt-ads/format";
 import { withUtm } from "@/lib/chatgpt-ads/utm";
 import type { AdCampaign, AdGroup, AdResource, Role } from "@/lib/types";
 
@@ -28,8 +29,9 @@ type Props = {
 
 const INPUT = "w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-black";
 const LABEL = "mb-1 block text-xs font-medium text-neutral-600";
-const HEADLINE_MAX = 50;
-const BODY_MAX = 160;
+// Hard field limits in the ChatGPT Ads Manager ad form.
+const HEADLINE_MAX = TITLE_MAX;
+const BODY_MAX = DESCRIPTION_MAX;
 
 function blankGroup(): AdGroupInput {
   return {
@@ -419,7 +421,7 @@ export default function CampaignBuilder(props: Props) {
                     </div>
                     <div>
                       <label className={LABEL}>
-                        Headline{" "}
+                        Title (Ads Manager &quot;Title&quot;){" "}
                         <span className={g.ad_headline.length > HEADLINE_MAX ? "text-red-600" : "text-neutral-400"}>
                           ({g.ad_headline.length}/{HEADLINE_MAX})
                         </span>
@@ -432,9 +434,9 @@ export default function CampaignBuilder(props: Props) {
                     </div>
                     <div>
                       <label className={LABEL}>
-                        Body{" "}
-                        <span className="text-neutral-400">
-                          ({g.ad_body.length} chars; aim under {BODY_MAX} before the disclosure tail)
+                        Description (Ads Manager &quot;Description&quot;, incl. disclosure){" "}
+                        <span className={g.ad_body.length > BODY_MAX ? "text-red-600" : "text-neutral-400"}>
+                          ({g.ad_body.length}/{BODY_MAX})
                         </span>
                       </label>
                       <textarea
@@ -454,6 +456,9 @@ export default function CampaignBuilder(props: Props) {
                       />
                       <p className="mt-1 break-all text-xs text-neutral-500">
                         Final URL: <span className="font-mono">{finalUrl || "—"}</span>
+                        <br />
+                        In Ads Manager this splits into the destination URL plus the &quot;Landing page query
+                        parameters&quot; field; the campaign page shows both ready to paste.
                       </p>
                     </div>
                     <div className="md:col-span-2">
