@@ -12,7 +12,7 @@ import {
 } from "@/app/(app)/ads/actions";
 import type { AdObjective } from "@/lib/chatgpt-ads/objectives";
 import { DESCRIPTION_MAX, TITLE_MAX } from "@/lib/chatgpt-ads/format";
-import { withUtm } from "@/lib/chatgpt-ads/utm";
+import { adsManagerUrlParts, withUtm } from "@/lib/chatgpt-ads/utm";
 import type { AdCampaign, AdGroup, AdResource, Role } from "@/lib/types";
 
 // AI campaign builder (create) and campaign editor (edit). Create mode: fill
@@ -377,6 +377,7 @@ export default function CampaignBuilder(props: Props) {
           <div className="space-y-4" data-testid="ad-group-cards">
             {groups.map((g, i) => {
               const finalUrl = withUtm(g.landing_page_url || form.landing_page_url, form.name, g.name);
+              const urlParts = adsManagerUrlParts(finalUrl);
               return (
                 <section key={g.id ?? `new-${i}`} className="rounded-md border border-neutral-200 bg-white p-5">
                   <div className="mb-3 flex items-center justify-between">
@@ -454,12 +455,19 @@ export default function CampaignBuilder(props: Props) {
                         placeholder={form.landing_page_url}
                         className={INPUT}
                       />
-                      <p className="mt-1 break-all text-xs text-neutral-500">
-                        Final URL: <span className="font-mono">{finalUrl || "—"}</span>
-                        <br />
-                        In Ads Manager this splits into the destination URL plus the &quot;Landing page query
-                        parameters&quot; field; the campaign page shows both ready to paste.
-                      </p>
+                      <div className="mt-1 space-y-0.5 break-all text-xs text-neutral-500">
+                        <p>
+                          Ads Manager &quot;Ad destination URL&quot;:{" "}
+                          <span className="font-mono">{urlParts.destination_url || "—"}</span>
+                        </p>
+                        <p>
+                          Ads Manager &quot;Landing page query parameters&quot;:{" "}
+                          <span className="font-mono">{urlParts.query_parameters || "—"}</span>
+                        </p>
+                        <p className="text-neutral-400">
+                          Saved as one tagged URL; copy buttons for both pieces are on the campaign page.
+                        </p>
+                      </div>
                     </div>
                     <div className="md:col-span-2">
                       <label className={LABEL}>Image prompt</label>
