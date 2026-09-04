@@ -71,6 +71,25 @@ That kicks off Reddit + BiggerPockets + Stack Exchange + drafting. Takes 1–3 m
 
 ---
 
+## ChatGPT Ads tab (`/ads`)
+
+Builds paid campaigns for OpenAI's ChatGPT Ads with AI and tracks results. There is no public
+ChatGPT Ads API yet, so the flow is: generate the package here -> paste it into the Ads Manager at
+<https://ads.openai.com> -> log daily results back on the campaign page.
+
+- Run `supabase/migrations/014_chatgpt_ads.sql` once in the Supabase SQL Editor (tables:
+  `ad_campaigns`, `ad_groups`, `ad_campaign_metrics`, `ad_resources`, all per-user via RLS).
+- Every ad group URL is tagged `utm_source=chatgpt_ads&utm_medium=paid&utm_campaign=<campaign slug>&utm_content=<ad group slug>`.
+- Loan officers get mortgage objectives with NMLS / Equal Housing Lender disclosures and no rate,
+  guarantee, or "pre-approved" language; realtors get listing/buyer/seller/relocation objectives
+  with Fair Housing-safe copy and no mortgage compliance language.
+- Platform integration lives only in `lib/chatgpt-ads/service.ts`. `pushCampaignToChatGPT`,
+  `syncCampaignMetrics`, and `ingestConversionEvent` (webhook at `/api/chatgpt-ads/conversions`)
+  are stubs to fill in when OpenAI ships an API / the Conversions API spec.
+- Test generation without the UI: `npx tsx scripts/test-chatgpt-ads.ts` (`--lo-only` / `--realtor-only`).
+
+---
+
 ## Deploying to Vercel
 
 ### 1. Push to GitHub

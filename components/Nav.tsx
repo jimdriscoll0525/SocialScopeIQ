@@ -34,6 +34,9 @@ export default function Nav({
             <Link href="/groups" className="text-neutral-600 hover:text-black">
               Groups
             </Link>
+            <Link href="/ads" className="text-neutral-600 hover:text-black">
+              ChatGPT Ads
+            </Link>
             <Link href="/settings" className="text-neutral-600 hover:text-black">
               Settings
             </Link>

@@ -6,7 +6,8 @@ import { NextResponse, type NextRequest } from "next/server";
 // /auth/*, the public blog pages (/agents/*, /lo/*), the public landing page
 // /blog/2-1-buydown and its form endpoint /api/lead-capture (NOT /blog itself
 // — that's the authed blog manager), sitemap/robots, the token- or
-// secret-authenticated APIs (/api/bookmarklet, /api/scout, /api/blog-cron),
+// secret-authenticated APIs (/api/bookmarklet, /api/scout, /api/blog-cron,
+// /api/chatgpt-ads/*),
 // Next internals, and static files.
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -53,6 +54,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon\\.ico|login|auth(?:/|$)|agents(?:/|$)|lo(?:/|$)|blog/2-1-buydown(?:/|$)|home(?:/|$)|sitemap\\.xml|robots\\.txt|api/bookmarklet|api/scout|api/blog-cron|api/lead-capture(?:/|$)|.*\\.[\\w]+$).*)"
+    "/((?!_next/static|_next/image|favicon\\.ico|login|auth(?:/|$)|agents(?:/|$)|lo(?:/|$)|blog/2-1-buydown(?:/|$)|home(?:/|$)|sitemap\\.xml|robots\\.txt|api/bookmarklet|api/scout|api/blog-cron|api/chatgpt-ads(?:/|$)|api/lead-capture(?:/|$)|.*\\.[\\w]+$).*)"
   ]
 };

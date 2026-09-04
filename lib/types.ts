@@ -136,3 +136,70 @@ export interface ScoutResult {
   // (currently Reddit only; BiggerPockets replies arrive inline in `body`).
   comments?: string[];
 }
+
+// --- ChatGPT Ads -------------------------------------------------------------
+// Campaigns are built here and pasted into OpenAI's Ads Manager by hand (no
+// public campaign API yet). See lib/chatgpt-ads/service.ts.
+
+export type AdCampaignStatus = "draft" | "submitted_to_chatgpt" | "active" | "paused" | "ended";
+export type AdGroupStatus = "draft" | "active" | "paused" | "ended";
+export type AdBidType = "cpc" | "cpm";
+export type AdMetricSource = "manual" | "conversions_api";
+
+export interface AdCampaign {
+  id: string;
+  user_id: string;
+  name: string;
+  status: AdCampaignStatus;
+  objective: string;
+  target_market: string;
+  daily_budget: number;
+  bid_type: AdBidType;
+  landing_page_url: string;
+  notes: string | null;
+  external_campaign_id: string | null;
+  external_status: string | null;
+  synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdGroup {
+  id: string;
+  campaign_id: string;
+  position: number;
+  name: string;
+  audience_theme: string;
+  targeting_instructions: string;
+  ad_headline: string;
+  ad_body: string;
+  ad_image_prompt: string;
+  ad_image_url: string | null;
+  landing_page_url: string;
+  status: AdGroupStatus;
+  external_ad_group_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdCampaignMetric {
+  id: string;
+  campaign_id: string;
+  date: string; // YYYY-MM-DD
+  impressions: number;
+  clicks: number;
+  leads: number;
+  spend: number;
+  source: AdMetricSource;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdResource {
+  id: string;
+  user_id: string;
+  title: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
