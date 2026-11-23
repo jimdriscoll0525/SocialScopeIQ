@@ -79,12 +79,17 @@ export default async function HomePage() {
             <p className="font-serif text-lg font-bold text-blue-950">Jim Driscoll</p>
             <p className="text-xs text-neutral-500">Mortgage Loan Officer · Mortgage Equity Partners · NMLS #21420</p>
           </div>
-          <a
-            href="#get-started"
-            className="rounded-md bg-blue-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-800"
-          >
-            Get Started
-          </a>
+          <div className="flex shrink-0 items-center gap-4">
+            <Link href="/login" className="text-sm font-semibold text-blue-900 hover:underline">
+              Log in
+            </Link>
+            <a
+              href="#get-started"
+              className="rounded-md bg-blue-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-800"
+            >
+              Get Started
+            </a>
+          </div>
         </div>
       </header>
 
@@ -221,6 +226,11 @@ export default async function HomePage() {
           <p className="mt-4 max-w-3xl text-xs leading-relaxed text-blue-300">
             This site is for educational purposes and does not constitute an offer of credit or a
             rate quote. All loans subject to credit approval.
+          </p>
+          <p className="mt-4 text-xs">
+            <Link href="/login" className="text-blue-300 underline underline-offset-2 hover:text-white">
+              SocialScopeIQ log in
+            </Link>
           </p>
         </div>
       </footer>
